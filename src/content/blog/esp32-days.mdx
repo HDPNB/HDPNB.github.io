@@ -1,0 +1,63 @@
+---
+title: 最近在折腾ESP32
+description: 从一只传感器开始，桌面慢慢长出了一小片线缆森林。
+pubDate: 2026-06-28
+updatedDate: 2026-07-02
+category: 嵌入式开发
+tags: [ESP32, 传感器, MQTT, 项目进展]
+cover: /images/projects/esp32.png
+draft: false
+featured: true
+---
+
+最开始只是想读一下温湿度。
+
+板子接上，串口能稳定打印数字以后，我又顺手接了光照传感器。然后是烟雾、蜂鸣器、舵机……桌面很快就从“一个小实验”变成了“最好先别碰这些线”。
+
+## 今天让它做了什么
+
+现在这套小东西大概能完成：
+
+- 定时读取温湿度和光照
+- 在烟雾数值异常时提醒
+- 通过消息控制舵机和蜂鸣器
+- 向手机端报告自己还在线
+
+真正麻烦的不是让某个功能跑起来，而是让它们一起运行时别互相影响。
+
+## 一小段代码
+
+下面是一个很简化的传感器数据结构。真实项目里还要处理读取失败、校验和数据平滑。
+
+```c
+typedef struct {
+    float temperature;
+    float humidity;
+    uint16_t light;
+    uint16_t smoke;
+    bool alarm;
+} EnvironmentData;
+
+static bool should_alarm(const EnvironmentData *data) {
+    if (data == NULL) {
+        return false;
+    }
+    return data->smoke > 650 || data->temperature > 38.0f;
+}
+```
+
+复制按钮已经放在代码块右上角，等以后回来抄自己的代码时会方便一点。
+
+## 不太听话的读数
+
+烟雾传感器刚上电时数值会乱跳，光照也会因为手在旁边移动而突然变化。如果只写一个简单的“大于阈值就报警”，蜂鸣器就会像在表达自己的情绪。
+
+> 稳定不是数值永远不变，而是系统知道哪些变化值得认真对待。
+
+后来加了简单平均和阈值回差，桌面终于安静了一些。
+
+<div class="callout"><strong>注意：</strong>示例阈值只用于当前实验环境，真正使用时需要按传感器、场景和安全要求重新标定。</div>
+
+## 下一步
+
+准备把手机端的历史曲线补上，再认真收一遍线。如果最后能装进一个不太丑的外壳，就算是这段折腾很好的结尾了。

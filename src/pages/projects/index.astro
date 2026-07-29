@@ -1,0 +1,18 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import ProjectCard from '@/components/ProjectCard.astro';
+import { projects } from '@/data/projects';
+---
+
+<BaseLayout title="我的项目" description="一些做过、正在做，或者还想继续改进的小项目。">
+  <header class="page-hero container">
+    <span class="eyebrow">THINGS I MADE</span>
+    <h1>把想法一点点做出来</h1>
+    <p>它们都不完美，但每个亮起来的灯、跑起来的界面，都留下了一点真实的开心。</p>
+  </header>
+  <section class="page-section--tight">
+    <div class="container project-grid">
+      {projects.map((project) => <ProjectCard project={project} />)}
+    </div>
+  </section>
+</BaseLayout>

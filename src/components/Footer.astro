@@ -1,0 +1,18 @@
+---
+import { siteConfig } from '@/data/site';
+---
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div>
+      <strong>{siteConfig.name}</strong>
+      <p>{siteConfig.footerText}</p>
+    </div>
+    <div class="footer-links">
+      <span>© {new Date().getFullYear()}</span>
+      <a href="/rss.xml">RSS</a>
+      <a href="/sitemap-index.xml">网站地图</a>
+      <a href="#main-content">返回顶部</a>
+    </div>
+  </div>
+</footer>

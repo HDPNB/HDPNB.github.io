@@ -1,0 +1,59 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import BaseLayout from './BaseLayout.astro';
+import Giscus from '@/components/Giscus.astro';
+import { formatDate, readingTime } from '@/utils/content';
+
+interface Heading { depth: number; slug: string; text: string; }
+interface Props {
+  post: CollectionEntry<'blog'>;
+  headings: Heading[];
+  previous?: CollectionEntry<'blog'>;
+  next?: CollectionEntry<'blog'>;
+}
+
+const { post, headings, previous, next } = Astro.props;
+const { title, description, pubDate, updatedDate, category, tags, cover } = post.data;
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+---
+
+<BaseLayout title={title} description={description} image={cover} type="article">
+  <article>
+    <header class="article-header narrow">
+      <span class="eyebrow">{category}</span>
+      <h1>{title}</h1>
+      <p class="article-header__desc">{description}</p>
+      <div class="article-header__meta">
+        <time datetime={pubDate.toISOString()}>发布于 {formatDate(pubDate)}</time>
+        {updatedDate && <time datetime={updatedDate.toISOString()}>更新于 {formatDate(updatedDate)}</time>}
+        <span>{readingTime(post.body)} 分钟阅读</span>
+      </div>
+      <div class="chip-list" style="justify-content:center;margin-top:1rem">
+        {tags.map((tag) => <span>{tag}</span>)}
+      </div>
+    </header>
+    {cover && (
+      <figure class="article-cover">
+        <img src={cover} alt={`${title}的封面图`} width="1400" height="900" />
+      </figure>
+    )}
+    <div class="article-shell">
+      <div>
+        <div class="prose"><slot /></div>
+        <nav class="post-nav" aria-label="上一篇和下一篇">
+          {previous ? <a href={`/blog/${previous.slug}/`}><span>上一篇</span>{previous.data.title}</a> : <span></span>}
+          {next ? <a href={`/blog/${next.slug}/`}><span>下一篇</span>{next.data.title}</a> : <span></span>}
+        </nav>
+        <Giscus />
+      </div>
+      {toc.length > 0 && (
+        <aside class="article-toc" aria-label="文章目录">
+          <strong>这篇文章</strong>
+          {toc.map((heading) => (
+            <a href={`#${heading.slug}`} style={heading.depth === 3 ? 'padding-left:1.5rem' : undefined}>{heading.text}</a>
+          ))}
+        </aside>
+      )}
+    </div>
+  </article>
+</BaseLayout>

@@ -1,0 +1,19 @@
+---
+interface Photo { src: string; alt: string; caption: string; date?: string; }
+interface Props { photos: readonly Photo[]; }
+const { photos } = Astro.props;
+---
+
+<div class="photo-grid">
+  {photos.map((photo, index) => (
+    <figure class:list={['photo-item', `photo-item--${index % 4}`]}>
+      <button class="photo-button" type="button" data-lightbox data-caption={`${photo.caption}${photo.date ? ` · ${photo.date}` : ''}`} aria-label={`查看大图：${photo.alt}`}>
+        <img src={photo.src} alt={photo.alt} loading="lazy" width="900" height="700" />
+      </button>
+      <figcaption>
+        <span>{photo.caption}</span>
+        {photo.date && <time>{photo.date}</time>}
+      </figcaption>
+    </figure>
+  ))}
+</div>

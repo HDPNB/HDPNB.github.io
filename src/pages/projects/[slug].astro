@@ -1,0 +1,90 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import PhotoGrid from '@/components/PhotoGrid.astro';
+import { projects } from '@/data/projects';
+
+export function getStaticPaths() {
+  return projects.map((project) => ({ params: { slug: project.slug }, props: { project } }));
+}
+
+const { project } = Astro.props;
+---
+
+<BaseLayout title={project.name} description={project.intro} image={project.cover}>
+  <header class="project-detail-hero">
+    <div class="container project-detail-grid">
+      <div>
+        <span class="eyebrow">PROJECT NOTE</span>
+        <h1>{project.name}</h1>
+        <p>{project.intro}</p>
+        <div class="detail-stats">
+          <span>{project.period}</span>
+          <span>{project.status}</span>
+        </div>
+        <div class="chip-list">{project.tech.map((tech: string) => <span>{tech}</span>)}</div>
+      </div>
+      <figure class="project-detail-image">
+        <img src={project.cover} alt={`${project.name}项目照片`} width="1000" height="900" />
+      </figure>
+    </div>
+  </header>
+
+  <section class="page-section soft-section">
+    <div class="container detail-grid">
+      <section class="detail-block">
+        <h2>项目背景</h2><p>{project.background}</p>
+      </section>
+      <section class="detail-block">
+        <h2>项目目标</h2><p>{project.goal}</p>
+      </section>
+      <section class="detail-block">
+        <h2>系统组成</h2><ul class="simple-list">{project.composition.map((item: string) => <li>{item}</li>)}</ul>
+      </section>
+      <section class="detail-block">
+        <h2>我的工作</h2><ul class="simple-list">{project.contribution.map((item: string) => <li>{item}</li>)}</ul>
+      </section>
+      <section class="detail-block">
+        <h2>硬件组成</h2><ul class="simple-list">{project.hardware.map((item: string) => <li>{item}</li>)}</ul>
+      </section>
+      <section class="detail-block">
+        <h2>软件技术</h2><ul class="simple-list">{project.software.map((item: string) => <li>{item}</li>)}</ul>
+      </section>
+      <section class="detail-block detail-block--wide">
+        <h2>开发过程</h2><ol class="simple-list">{project.process.map((item: string) => <li>{item}</li>)}</ol>
+      </section>
+      <section class="detail-block">
+        <h2>遇到的问题</h2><p>{project.problem}</p>
+      </section>
+      <section class="detail-block">
+        <h2>解决方法</h2><p>{project.solution}</p>
+      </section>
+      <section class="detail-block detail-block--wide">
+        <h2>最终效果</h2><p>{project.result}</p>
+        <div class="chip-list">{project.features.map((item: string) => <span>{item}</span>)}</div>
+      </section>
+    </div>
+  </section>
+
+  <section class="page-section">
+    <div class="container">
+      <header class="section-heading"><span class="eyebrow">PROCESS</span><h2>一段不太正式的时间线</h2></header>
+      <div class="timeline narrow" style="margin-left:0">
+        {project.timeline.map((item: { date: string; text: string }) => <div class="timeline-item"><strong>{item.date}</strong><p>{item.text}</p></div>)}
+      </div>
+    </div>
+  </section>
+
+  <section class="page-section soft-section">
+    <div class="container">
+      <header class="section-heading"><span class="eyebrow">GALLERY</span><h2>项目图片</h2></header>
+      <PhotoGrid photos={project.gallery} />
+    </div>
+  </section>
+
+  <section class="page-section">
+    <div class="narrow detail-block">
+      <h2>后续想改进的地方</h2>
+      <ul class="simple-list">{project.improvements.map((item: string) => <li>{item}</li>)}</ul>
+    </div>
+  </section>
+</BaseLayout>

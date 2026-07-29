@@ -1,0 +1,16 @@
+---
+interface Photo { src: string; alt: string; caption: string; }
+interface Props { photos: Photo[]; }
+const { photos } = Astro.props;
+---
+
+<div class="article-gallery">
+  {photos.map((photo) => (
+    <figure>
+      <button type="button" data-lightbox data-caption={photo.caption} aria-label={`查看大图：${photo.alt}`}>
+        <img src={photo.src} alt={photo.alt} loading="lazy" width="900" height="680" />
+      </button>
+      <figcaption>{photo.caption}</figcaption>
+    </figure>
+  ))}
+</div>

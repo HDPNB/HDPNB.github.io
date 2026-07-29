@@ -1,0 +1,76 @@
+---
+interface Props {
+  categories: string[];
+  tags: string[];
+  defaultSort?: 'desc' | 'asc';
+}
+const { categories, tags, defaultSort = 'desc' } = Astro.props;
+---
+
+<div class="filter-panel" data-filter-panel>
+  <label>
+    <span>分类</span>
+    <select data-category-filter>
+      <option value="">全部分类</option>
+      {categories.map((category) => <option value={category}>{category}</option>)}
+    </select>
+  </label>
+  <label>
+    <span>标签</span>
+    <select data-tag-filter>
+      <option value="">全部标签</option>
+      {tags.map((tag) => <option value={tag}>{tag}</option>)}
+    </select>
+  </label>
+  <label>
+    <span>排序</span>
+    <select data-sort-filter>
+      <option value="desc" selected={defaultSort === 'desc'}>从新到旧</option>
+      <option value="asc" selected={defaultSort === 'asc'}>从旧到新</option>
+    </select>
+  </label>
+  <button class="button button--ghost" type="button" data-reset-filter>清空筛选</button>
+</div>
+<p class="filter-empty" hidden>这里暂时没有符合筛选条件的Story，换个选项看看吧。</p>
+<div class="load-more-wrap">
+  <button class="button button--soft" type="button" data-load-more>再看一些</button>
+</div>
+
+<script>
+  const panel = document.querySelector<HTMLElement>('[data-filter-panel]');
+  const grid = panel?.nextElementSibling?.matches('.post-grid') ? panel.nextElementSibling : document.querySelector('.filterable-grid');
+  const cards = Array.from(grid?.querySelectorAll<HTMLElement>('.post-card') || []);
+  const category = panel?.querySelector<HTMLSelectElement>('[data-category-filter]');
+  const tag = panel?.querySelector<HTMLSelectElement>('[data-tag-filter]');
+  const sort = panel?.querySelector<HTMLSelectElement>('[data-sort-filter]');
+  const reset = panel?.querySelector<HTMLButtonElement>('[data-reset-filter]');
+  const empty = document.querySelector<HTMLElement>('.filter-empty');
+  const loadMore = document.querySelector<HTMLButtonElement>('[data-load-more]');
+  let visibleLimit = 6;
+
+  const apply = () => {
+    const matched = cards.filter((card) => {
+      const categoryMatch = !category?.value || card.dataset.category === category.value;
+      const tagMatch = !tag?.value || (card.dataset.tags || '').split(',').includes(tag.value);
+      return categoryMatch && tagMatch;
+    }).sort((a, b) => {
+      const delta = new Date(a.dataset.date || '').getTime() - new Date(b.dataset.date || '').getTime();
+      return sort?.value === 'asc' ? delta : -delta;
+    });
+    matched.forEach((card) => grid?.appendChild(card));
+    cards.forEach((card) => (card.hidden = true));
+    matched.slice(0, visibleLimit).forEach((card) => (card.hidden = false));
+    if (empty) empty.hidden = matched.length > 0;
+    if (loadMore) loadMore.hidden = matched.length <= visibleLimit;
+  };
+  [category, tag, sort].forEach((select) => select?.addEventListener('change', () => { visibleLimit = 6; apply(); }));
+  reset?.addEventListener('click', () => {
+    if (category) category.value = '';
+    if (tag) tag.value = '';
+    if (sort) sort.value = 'desc';
+    visibleLimit = 6;
+    apply();
+  });
+  loadMore?.addEventListener('click', () => { visibleLimit += 6; apply(); });
+  apply();
+</script>

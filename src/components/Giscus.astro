@@ -1,0 +1,50 @@
+---
+import { giscusConfig as config } from '@/data/giscus';
+---
+
+<section class="comments" aria-labelledby="comments-title">
+  <h2 id="comments-title">说点什么</h2>
+  {config.enabled && config.repo && config.repoId && config.categoryId ? (
+    <div class="giscus-host"
+      data-repo={config.repo}
+      data-repo-id={config.repoId}
+      data-category={config.category}
+      data-category-id={config.categoryId}
+      data-mapping={config.mapping}
+      data-strict={config.strict}
+      data-reactions-enabled={config.reactionsEnabled}
+      data-emit-metadata={config.emitMetadata}
+      data-input-position={config.inputPosition}
+      data-lang={config.lang}>
+    </div>
+  ) : (
+    <div class="comment-placeholder">
+      <span aria-hidden="true">☁</span>
+      <strong>留言区正在准备中</strong>
+      <p>等我把小板凳摆好，这里就可以一起聊天了。</p>
+    </div>
+  )}
+</section>
+
+{config.enabled && (
+  <script>
+    const host = document.querySelector<HTMLElement>('.giscus-host');
+    if (host) {
+      const script = document.createElement('script');
+      script.src = 'https://giscus.app/client.js';
+      script.async = true;
+      script.crossOrigin = 'anonymous';
+      const map: Record<string, string> = {
+        repo: 'repo', repoId: 'repo-id', category: 'category', categoryId: 'category-id',
+        mapping: 'mapping', strict: 'strict', reactionsEnabled: 'reactions-enabled',
+        emitMetadata: 'emit-metadata', inputPosition: 'input-position', lang: 'lang',
+      };
+      Object.entries(map).forEach(([key, attr]) => {
+        const value = host.dataset[key as keyof DOMStringMap];
+        if (value) script.setAttribute(`data-${attr}`, value);
+      });
+      script.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'dark_dimmed' : 'light';
+      host.appendChild(script);
+    }
+  </script>
+)}

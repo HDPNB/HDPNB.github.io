@@ -1,0 +1,66 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import SectionHeading from '@/components/SectionHeading.astro';
+import PostCard from '@/components/PostCard.astro';
+import PhotoGrid from '@/components/PhotoGrid.astro';
+import { siteConfig } from '@/data/site';
+import { featuredPhotos } from '@/data/photos';
+
+const posts = (await getCollection('blog', ({ data }) => !data.draft))
+  .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf())
+  .slice(0, 6);
+---
+
+<BaseLayout title={siteConfig.name} description={siteConfig.description}>
+  <section class="hero">
+    <div class="container hero__grid">
+      <div class="hero__copy">
+        <span class="eyebrow">WELCOME, FRIEND</span>
+        <h1>{siteConfig.homeTitle}</h1>
+        <p class="hero__subtitle">{siteConfig.homeSubtitle}</p>
+        <p class="hero__note">{siteConfig.homeNote}</p>
+        <div class="hero__actions">
+          <a class="button button--primary" href="#recent">随便看看</a>
+          <a class="button button--ghost" href="/search/">最近更新</a>
+        </div>
+      </div>
+      <div class="hero__visual" aria-label="校园与生活照片">
+        <div class="hero__photo hero__photo--main">
+          <img src="/images/campus/sunset.png" alt="柔和暮色中的校园小路" width="900" height="1100" />
+        </div>
+        <div class="hero__photo hero__photo--small">
+          <img src="/images/life/sky.png" alt="云朵缓慢飘过的天空" width="700" height="520" />
+        </div>
+        <div class="hero__note-card">今日份：慢一点，也没关系。</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="page-section--tight">
+    <div class="container intro-card reveal">
+      <div>
+        <span class="eyebrow">ABOUT THIS PLACE</span>
+        <h2>{siteConfig.introTitle}</h2>
+        <p>{siteConfig.introText}</p>
+        <div class="chip-list">{siteConfig.introTags.map((tag) => <span>{tag}</span>)}</div>
+      </div>
+      <div class="intro-doodle" aria-hidden="true">慢</div>
+    </div>
+  </section>
+
+  <section class="page-section" id="recent">
+    <div class="container">
+      <SectionHeading eyebrow="RECENT STORIES" title="最近留下的片段" text="生活、学习和项目混在一起，像桌面上还没来得及整理的照片。" />
+      <div class="post-grid">{posts.map((post) => <PostCard post={post} />)}</div>
+      <div class="section-end"><a class="button button--soft" href="/search/">看看全部Story</a></div>
+    </div>
+  </section>
+
+  <section class="page-section soft-section">
+    <div class="container">
+      <SectionHeading eyebrow="PHOTO NOTES" title="精选照片" text="不是作品集，只是一些当时舍不得删掉的画面。" />
+      <PhotoGrid photos={featuredPhotos} />
+    </div>
+  </section>
+</BaseLayout>

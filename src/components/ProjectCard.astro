@@ -1,0 +1,19 @@
+---
+import type { Project } from '@/data/projects';
+interface Props { project: Project; }
+const { project } = Astro.props;
+---
+
+<article class="project-card reveal">
+  <a class="project-card__image" href={`/projects/${project.slug}/`}>
+    <img src={project.cover} alt={`${project.name}项目封面`} loading="lazy" width="1000" height="720" />
+    <span>{project.status}</span>
+  </a>
+  <div class="project-card__body">
+    <p class="project-time">{project.period}</p>
+    <h2><a href={`/projects/${project.slug}/`}>{project.name}</a></h2>
+    <p>{project.intro}</p>
+    <div class="chip-list">{project.tech.map((tech) => <span>{tech}</span>)}</div>
+    <a class="text-link" href={`/projects/${project.slug}/`}>查看详情 <span aria-hidden="true">→</span></a>
+  </div>
+</article>

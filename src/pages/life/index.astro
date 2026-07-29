@@ -1,0 +1,25 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import PostCard from '@/components/PostCard.astro';
+import FilterBar from '@/components/FilterBar.astro';
+
+const lifeCategories = ['校园生活', '随手记录', '旅行与摄影'];
+const posts = (await getCollection('blog', ({ data }) => !data.draft && lifeCategories.includes(data.category)))
+  .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+const tags = [...new Set(posts.flatMap((post) => post.data.tags))];
+---
+
+<BaseLayout title="日常生活" description="校园、旅行和那些随手记下来的普通日子。">
+  <header class="page-hero container">
+    <span class="eyebrow">DAILY LIFE</span>
+    <h1>日常生活</h1>
+    <p>没有什么特别的主题，只是一些想留下来的日子。</p>
+  </header>
+  <section class="page-section--tight">
+    <div class="container">
+      <FilterBar categories={lifeCategories} tags={tags} />
+      <div class="post-grid filterable-grid">{posts.map((post) => <PostCard post={post} />)}</div>
+    </div>
+  </section>
+</BaseLayout>

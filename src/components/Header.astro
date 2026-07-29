@@ -1,0 +1,55 @@
+---
+import { siteConfig } from '@/data/site';
+const path = Astro.url.pathname;
+const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith(href);
+---
+
+<header class="site-header" data-header>
+  <div class="nav-shell">
+    <a class="brand" href="/" aria-label={`${siteConfig.name}首页`}>
+      <span class="brand-mark" aria-hidden="true">H</span>
+      <span>{siteConfig.name}</span>
+    </a>
+    <nav class="desktop-nav" aria-label="主导航">
+      {siteConfig.nav.map((item) => (
+        <a href={item.href} class:list={{ active: isActive(item.href) }} aria-current={isActive(item.href) ? 'page' : undefined}>{item.label}</a>
+      ))}
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-button" href="/search/" aria-label="搜索" title="搜索">⌕</a>
+      <button class="icon-button theme-toggle" type="button" aria-label="切换深色模式" title="切换明暗主题">
+        <span class="theme-light" aria-hidden="true">☾</span>
+        <span class="theme-dark" aria-hidden="true">☀</span>
+      </button>
+      <button class="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false">菜单</button>
+    </div>
+  </div>
+  <nav class="mobile-nav" aria-label="手机导航" hidden>
+    {siteConfig.nav.map((item) => (
+      <a href={item.href} class:list={{ active: isActive(item.href) }}>{item.label}</a>
+    ))}
+    <a href="/search/">搜索文章</a>
+  </nav>
+</header>
+
+<script>
+  const themeButton = document.querySelector<HTMLButtonElement>('.theme-toggle');
+  themeButton?.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem('hdp-theme', next);
+    document.querySelectorAll<HTMLIFrameElement>('iframe.giscus-frame').forEach((frame) => {
+      frame.contentWindow?.postMessage({ giscus: { setConfig: { theme: next === 'dark' ? 'dark_dimmed' : 'light' } } }, 'https://giscus.app');
+    });
+  });
+
+  const menuButton = document.querySelector<HTMLButtonElement>('.menu-toggle');
+  const mobileNav = document.querySelector<HTMLElement>('.mobile-nav');
+  menuButton?.addEventListener('click', () => {
+    if (!mobileNav) return;
+    const open = mobileNav.hidden;
+    mobileNav.hidden = !open;
+    menuButton.setAttribute('aria-expanded', String(open));
+    menuButton.textContent = open ? '收起' : '菜单';
+  });
+</script>

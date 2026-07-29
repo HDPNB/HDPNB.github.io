@@ -1,0 +1,25 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import PostCard from '@/components/PostCard.astro';
+import FilterBar from '@/components/FilterBar.astro';
+
+const learnCategories = ['C/C++', 'Python', '嵌入式开发', '项目进展'];
+const posts = (await getCollection('blog', ({ data }) => !data.draft && learnCategories.includes(data.category)))
+  .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+const tags = [...new Set(posts.flatMap((post) => post.data.tags))];
+---
+
+<BaseLayout title="学习记录" description="关于C/C++、Python与嵌入式开发的学习片段。">
+  <header class="page-hero container">
+    <span class="eyebrow">LEARNING NOTES</span>
+    <h1>慢慢学，也慢慢记</h1>
+    <p>这里没有高深的口号，只有踩过的坑、突然想通的瞬间，以及以后可能会忘掉的小细节。</p>
+  </header>
+  <section class="page-section--tight">
+    <div class="container">
+      <FilterBar categories={learnCategories} tags={tags} />
+      <div class="post-grid filterable-grid">{posts.map((post) => <PostCard post={post} />)}</div>
+    </div>
+  </section>
+</BaseLayout>

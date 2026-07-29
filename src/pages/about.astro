@@ -1,0 +1,48 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { aboutConfig } from '@/data/site';
+---
+
+<BaseLayout title="关于我" description="关于HDP，也关于这个慢慢长大的个人空间。">
+  <header class="page-hero container">
+    <span class="eyebrow">A LITTLE ABOUT ME</span>
+    <h1>先随便认识一下</h1>
+    <p>{aboutConfig.lead}</p>
+  </header>
+  <section class="page-section--tight">
+    <div class="container about-grid">
+      <section class="about-card">
+        <h2>最近在做什么</h2>
+        <p>{aboutConfig.now}</p>
+        <div class="chip-list">{aboutConfig.tags.map((tag) => <span>{tag}</span>)}</div>
+      </section>
+      <section class="about-card">
+        <h2>喜欢的事情</h2>
+        <ul class="simple-list">{aboutConfig.likes.map((item) => <li>{item}</li>)}</ul>
+      </section>
+      <section class="about-card">
+        <h2>最近想完成</h2>
+        <ul class="simple-list">{aboutConfig.goals.map((item) => <li>{item}</li>)}</ul>
+      </section>
+      <section class="about-card">
+        <h2>一条很短的时间线</h2>
+        <div class="timeline">
+          {aboutConfig.timeline.map((item) => <div class="timeline-item"><strong>{item.date}</strong><p>{item.text}</p></div>)}
+        </div>
+      </section>
+      <section class="about-card about-card--wide">
+        <h2>一些生活照片</h2>
+        <div class="about-photos">
+          {aboutConfig.photos.map((photo) => (
+            <figure>
+              <button class="photo-button" type="button" data-lightbox data-caption={photo.caption} aria-label={`查看大图：${photo.alt}`}>
+                <img src={photo.src} alt={photo.alt} loading="lazy" width="900" height="650" />
+              </button>
+              <figcaption>{photo.caption}</figcaption>
+            </figure>
+          ))}
+        </div>
+      </section>
+    </div>
+  </section>
+</BaseLayout>
