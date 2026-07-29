@@ -2,10 +2,12 @@ type CloudBaseSdk = typeof import('@cloudbase/js-sdk');
 
 export type CloudBaseApp = ReturnType<CloudBaseSdk['init']>;
 export type CloudBaseAuth = ReturnType<CloudBaseApp['auth']>;
+export type CloudBaseDatabase = ReturnType<CloudBaseApp['database']>;
 
 export interface CloudBaseClient {
   app: CloudBaseApp;
   auth: CloudBaseAuth;
+  database: CloudBaseDatabase;
 }
 
 export type CloudBaseClientResult =
@@ -60,6 +62,7 @@ export function getCloudBaseClient(): Promise<CloudBaseClientResult> {
           client: {
             app,
             auth: app.auth(),
+            database: app.database(),
           },
         } satisfies CloudBaseClientResult;
       })

@@ -41,6 +41,9 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
     <p class="user-menu__uid">
       UID：<code data-user-uid>—</code>
     </p>
+    <p class="user-menu__sync">
+      云端同步：<strong data-user-sync>正在检查</strong>
+    </p>
 
     <form class="user-menu__form" data-user-form>
       <label for="visitor-nickname">修改昵称</label>
@@ -75,9 +78,13 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
     restoreVisitorSession,
     signInAsVisitor,
     signOutVisitor,
-    updateVisitorNickname,
   } from '@/lib/auth';
+  import {
+    getOrCreateUserProfile,
+    updateUserProfileNickname,
+  } from '@/lib/user-profile';
   import type { VisitorSession } from '@/types/auth';
+  import type { UserProfileState } from '@/types/user-profile';
 
   const menu = document.querySelector<HTMLElement>('[data-user-menu]');
   const trigger = menu?.querySelector<HTMLButtonElement>('[data-user-trigger]');
@@ -86,6 +93,7 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
   const panel = menu?.querySelector<HTMLElement>('[data-user-panel]');
   const nickname = menu?.querySelector<HTMLElement>('[data-user-nickname]');
   const uid = menu?.querySelector<HTMLElement>('[data-user-uid]');
+  const sync = menu?.querySelector<HTMLElement>('[data-user-sync]');
   const form = menu?.querySelector<HTMLFormElement>('[data-user-form]');
   const input = menu?.querySelector<HTMLInputElement>('[data-user-input]');
   const message = menu?.querySelector<HTMLElement>('[data-user-message]');
@@ -124,20 +132,43 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
       trigger.setAttribute('aria-expanded', 'false');
     }
     if (panel) panel.hidden = true;
+    window.dispatchEvent(new CustomEvent('hdp:auth-changed', {
+      detail: { authenticated: false },
+    }));
   };
 
-  const renderSession = (nextSession: VisitorSession, open = false) => {
+  const renderSession = (
+    nextSession: VisitorSession,
+    profile?: UserProfileState,
+    open = false,
+  ) => {
     session = nextSession;
     if (label) label.textContent = `你好，${nextSession.nickname}`;
     if (badge) badge.textContent = nextSession.nickname.slice(0, 1);
     if (nickname) nickname.textContent = nextSession.nickname;
     if (uid) uid.textContent = nextSession.shortUid;
     if (input) input.value = nextSession.nickname;
+    if (sync) {
+      sync.textContent = profile?.syncMessage || '正在同步';
+      sync.dataset.status = profile?.syncStatus || 'cached';
+    }
     if (trigger) {
       trigger.disabled = false;
       trigger.setAttribute('aria-label', `你好，${nextSession.nickname}，打开游客菜单`);
     }
     setPanel(open);
+    window.dispatchEvent(new CustomEvent('hdp:auth-changed', {
+      detail: { authenticated: true },
+    }));
+  };
+
+  const syncSession = async (nextSession: VisitorSession) => {
+    const profile = await getOrCreateUserProfile(nextSession.uid);
+    if (!profile.ok) return { session: nextSession, profile: undefined };
+    return {
+      session: { ...nextSession, nickname: profile.data.nickname },
+      profile: profile.data,
+    };
   };
 
   const setBusy = (nextBusy: boolean, text?: string) => {
@@ -152,7 +183,8 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
     const result = await restoreVisitorSession();
     setBusy(false);
     if (result.ok) {
-      renderSession(result.data);
+      const synced = await syncSession(result.data);
+      renderSession(synced.session, synced.profile);
       return;
     }
     if (result.code === 'signed-out') {
@@ -179,7 +211,8 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
     const result = await signInAsVisitor();
     setBusy(false);
     if (result.ok) {
-      renderSession(result.data, true);
+      const synced = await syncSession(result.data);
+      renderSession(synced.session, synced.profile, true);
       setMessage('游客身份已经准备好了。');
     } else {
       renderSignedOut();
@@ -187,13 +220,26 @@ const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
     }
   });
 
-  form?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!session || !input) return;
-    const result = updateVisitorNickname(session.uid, input.value);
+    const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+    setMessage('正在保存昵称…');
+    const result = await updateUserProfileNickname(session.uid, input.value);
+    if (submitButton) submitButton.disabled = false;
     if (result.ok) {
-      renderSession(result.data, true);
-      setMessage('昵称已经保存在这台设备上。');
+      renderSession(
+        { ...session, nickname: result.data.nickname },
+        result.data,
+        true,
+      );
+      setMessage(
+        result.data.syncStatus === 'synced'
+          ? '昵称已同步到云端。'
+          : '云端暂时不可用，昵称已保存在这台设备上。',
+        result.data.syncStatus !== 'synced',
+      );
     } else {
       setMessage(result.message, true);
     }

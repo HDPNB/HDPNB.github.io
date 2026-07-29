@@ -1,13 +1,10 @@
 import { getCloudBaseClient } from '@/lib/cloudbase';
+import { DEFAULT_NICKNAME, getCachedNickname } from '@/lib/user-profile';
 import type {
   AuthFailureCode,
   AuthResult,
-  VisitorProfileRecord,
   VisitorSession,
 } from '@/types/auth';
-
-const PROFILE_STORAGE_KEY = 'hdp-cloudbase-visitor-profile';
-const DEFAULT_NICKNAME = '匿名访客';
 
 function authFailure(code: AuthFailureCode, message: string): AuthResult<never> {
   return { ok: false, code, message };
@@ -37,37 +34,15 @@ function friendlyAuthError(error: unknown): string {
   return '游客身份操作没有成功，请稍后再试。';
 }
 
-function readProfile(uid: string): VisitorProfileRecord | null {
-  try {
-    const raw = localStorage.getItem(PROFILE_STORAGE_KEY);
-    if (!raw) return null;
-    const profile = JSON.parse(raw) as Partial<VisitorProfileRecord>;
-    if (profile.uid !== uid || typeof profile.nickname !== 'string') return null;
-    return { uid, nickname: profile.nickname };
-  } catch {
-    return null;
-  }
-}
-
-function writeProfile(profile: VisitorProfileRecord): boolean {
-  try {
-    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function shortenUid(uid: string): string {
   if (uid.length <= 12) return uid;
   return `${uid.slice(0, 6)}…${uid.slice(-4)}`;
 }
 
 function createSession(uid: string): VisitorSession {
-  const profile = readProfile(uid);
   return {
     uid,
-    nickname: profile?.nickname || DEFAULT_NICKNAME,
+    nickname: getCachedNickname(uid) || DEFAULT_NICKNAME,
     identity: '游客',
     shortUid: shortenUid(uid),
   };
@@ -132,37 +107,4 @@ export async function signOutVisitor(): Promise<AuthResult<null>> {
   } catch (error) {
     return authFailure('auth-error', friendlyAuthError(error));
   }
-}
-
-export function updateVisitorNickname(
-  uid: string,
-  value: string,
-): AuthResult<VisitorSession> {
-  const nickname = value.trim().replace(/\s+/gu, ' ');
-  const length = Array.from(nickname).length;
-  const hasMarkup =
-    /[<>]/u.test(nickname) ||
-    /&(?:lt|gt|#0*60|#0*62|#x0*3c|#x0*3e);/iu.test(nickname);
-  const hasControlCharacters = /[\u0000-\u001f\u007f]/u.test(nickname);
-
-  if (length < 2 || length > 16) {
-    return authFailure('invalid-nickname', '昵称需要保持在 2 到 16 个字符之间。');
-  }
-  if (hasMarkup || hasControlCharacters) {
-    return authFailure('invalid-nickname', '昵称不能包含 HTML 标签或控制字符。');
-  }
-
-  const profile = { uid, nickname };
-  if (!writeProfile(profile)) {
-    return authFailure('auth-error', '昵称暂时无法保存在这台设备上。');
-  }
-
-  return {
-    ok: true,
-    data: {
-      ...profile,
-      identity: '游客',
-      shortUid: shortenUid(uid),
-    },
-  };
 }

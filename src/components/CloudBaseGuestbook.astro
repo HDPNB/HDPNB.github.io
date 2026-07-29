@@ -1,0 +1,199 @@
+---
+const enabled =
+  import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
+  Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
+---
+
+<section class="cloud-guestbook" data-cloud-guestbook data-enabled={String(enabled)}>
+  <div class="cloud-guestbook__intro">
+    <div>
+      <span class="eyebrow">SAY HELLO</span>
+      <h2>说点什么</h2>
+    </div>
+    <p>新留言会先安静地等一会儿，审核通过后再出现在这里。</p>
+  </div>
+
+  <div class="cloud-guestbook__unavailable" data-guestbook-unavailable hidden={enabled}>
+    <strong>留言功能暂时未开放</strong>
+    <p>其他内容仍然可以正常浏览，等这里准备好再来坐坐吧。</p>
+  </div>
+
+  <div data-guestbook-active hidden={!enabled}>
+    <p class="cloud-guestbook__login" data-guestbook-login>
+      请先以游客身份进入。
+    </p>
+
+    <form class="cloud-guestbook__form" data-guestbook-form hidden>
+      <label for="guestbook-content">想留下的话</label>
+      <textarea
+        id="guestbook-content"
+        name="content"
+        rows="5"
+        maxlength="300"
+        placeholder="可以是一句话、一段故事，也可以只是来打个招呼。"
+        required
+        data-guestbook-content
+      ></textarea>
+      <div class="cloud-guestbook__form-footer">
+        <span><span data-guestbook-count>0</span>/300</span>
+        <button type="submit" class="button button--primary" data-guestbook-submit>
+          留下这句话
+        </button>
+      </div>
+      <p class="cloud-guestbook__status" aria-live="polite" data-guestbook-status></p>
+    </form>
+
+    <div class="cloud-guestbook__list-heading">
+      <h3>已经留下的话</h3>
+      <button type="button" data-guestbook-refresh aria-label="刷新留言列表">刷新</button>
+    </div>
+    <div class="cloud-guestbook__loading" data-guestbook-loading>正在翻开留言本…</div>
+    <div class="cloud-guestbook__list" data-guestbook-list></div>
+    <p class="cloud-guestbook__empty" data-guestbook-empty hidden>
+      这里还很安静，等第一句话落下来。
+    </p>
+  </div>
+</section>
+
+<script>
+  import { restoreVisitorSession } from '@/lib/auth';
+  import {
+    loadGuestbookMessages,
+    submitGuestbookMessage,
+  } from '@/lib/guestbook';
+  import type { GuestbookMessageDocument, GuestbookStatus } from '@/types/guestbook';
+
+  const root = document.querySelector<HTMLElement>('[data-cloud-guestbook]');
+  const active = root?.querySelector<HTMLElement>('[data-guestbook-active]');
+  const unavailable = root?.querySelector<HTMLElement>('[data-guestbook-unavailable]');
+  const login = root?.querySelector<HTMLElement>('[data-guestbook-login]');
+  const form = root?.querySelector<HTMLFormElement>('[data-guestbook-form]');
+  const textarea = root?.querySelector<HTMLTextAreaElement>('[data-guestbook-content]');
+  const count = root?.querySelector<HTMLElement>('[data-guestbook-count]');
+  const submit = root?.querySelector<HTMLButtonElement>('[data-guestbook-submit]');
+  const status = root?.querySelector<HTMLElement>('[data-guestbook-status]');
+  const list = root?.querySelector<HTMLElement>('[data-guestbook-list]');
+  const loading = root?.querySelector<HTMLElement>('[data-guestbook-loading]');
+  const empty = root?.querySelector<HTMLElement>('[data-guestbook-empty]');
+  const refresh = root?.querySelector<HTMLButtonElement>('[data-guestbook-refresh]');
+  let signedIn = false;
+
+  const statusLabels: Record<GuestbookStatus, string> = {
+    approved: '已公开',
+    pending: '等待审核',
+    rejected: '未通过审核',
+  };
+
+  const formatDate = (date: Date) =>
+    new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+
+  const setStatus = (text = '', error = false) => {
+    if (!status) return;
+    status.textContent = text;
+    status.classList.toggle('is-error', error);
+  };
+
+  const renderMessages = (messages: GuestbookMessageDocument[]) => {
+    if (!list || !empty) return;
+    list.replaceChildren();
+    empty.hidden = messages.length > 0;
+
+    messages.forEach((message) => {
+      const article = document.createElement('article');
+      article.className = 'guestbook-message';
+
+      const header = document.createElement('header');
+      const author = document.createElement('strong');
+      const badge = document.createElement('span');
+      author.textContent = message.nickname;
+      badge.className = `guestbook-message__status is-${message.status}`;
+      badge.textContent = statusLabels[message.status];
+      header.append(author, badge);
+
+      const content = document.createElement('p');
+      content.className = 'guestbook-message__content';
+      content.textContent = message.content;
+
+      const time = document.createElement('time');
+      time.dateTime = message.createdAt.toISOString();
+      time.textContent = formatDate(message.createdAt);
+
+      article.append(header, content, time);
+
+      if (message.reply) {
+        const reply = document.createElement('div');
+        reply.className = 'guestbook-message__reply';
+        const replyLabel = document.createElement('strong');
+        const replyContent = document.createElement('p');
+        replyLabel.textContent = '站长回复';
+        replyContent.textContent = message.reply;
+        reply.append(replyLabel, replyContent);
+        article.append(reply);
+      }
+
+      list.append(article);
+    });
+  };
+
+  const loadMessages = async () => {
+    if (!root || root.dataset.enabled !== 'true') return;
+    if (loading) {
+      loading.hidden = false;
+      loading.textContent = '正在翻开留言本…';
+    }
+    const result = await loadGuestbookMessages();
+    if (loading) loading.hidden = true;
+    if (result.ok) {
+      renderMessages(result.data);
+      return;
+    }
+    if (active) active.hidden = true;
+    if (unavailable) {
+      unavailable.hidden = false;
+      const detail = unavailable.querySelector('p');
+      if (detail) detail.textContent = result.message;
+    }
+  };
+
+  const refreshIdentity = async () => {
+    const auth = await restoreVisitorSession();
+    signedIn = auth.ok;
+    if (login) login.hidden = signedIn;
+    if (form) form.hidden = !signedIn;
+    await loadMessages();
+  };
+
+  textarea?.addEventListener('input', () => {
+    if (count) count.textContent = String(Array.from(textarea.value).length);
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!textarea || !submit || !signedIn) return;
+    submit.disabled = true;
+    submit.textContent = '正在送出…';
+    setStatus('');
+    const result = await submitGuestbookMessage(textarea.value);
+    submit.disabled = false;
+    submit.textContent = '留下这句话';
+    if (result.ok) {
+      textarea.value = '';
+      if (count) count.textContent = '0';
+      setStatus('留言已经收到，审核通过后会公开显示。');
+      await loadMessages();
+    } else {
+      setStatus(result.message, true);
+    }
+  });
+
+  refresh?.addEventListener('click', loadMessages);
+  window.addEventListener('hdp:auth-changed', refreshIdentity);
+
+  if (root?.dataset.enabled === 'true') refreshIdentity();
+</script>
