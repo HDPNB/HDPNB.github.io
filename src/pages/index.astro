@@ -4,8 +4,10 @@ import BaseLayout from '@/layouts/BaseLayout.astro';
 import SectionHeading from '@/components/SectionHeading.astro';
 import PostCard from '@/components/PostCard.astro';
 import PhotoGrid from '@/components/PhotoGrid.astro';
+import RandomStory from '@/components/RandomStory.astro';
 import { siteConfig } from '@/data/site';
 import { featuredPhotos } from '@/data/photos';
+import { dailyMoods, welcomeMessages } from '@/data/interactions';
 
 const posts = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf())
@@ -20,10 +22,11 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
         <h1>{siteConfig.homeTitle}</h1>
         <p class="hero__subtitle">{siteConfig.homeSubtitle}</p>
         <p class="hero__note">{siteConfig.homeNote}</p>
-        <div class="hero__actions">
-          <a class="button button--primary" href="#recent">随便看看</a>
+        <div class="hero__actions" data-home-interactions data-welcomes={JSON.stringify(welcomeMessages)}>
+          <button class="button button--primary" type="button" data-random-welcome>随便看看</button>
           <a class="button button--ghost" href="/search/">最近更新</a>
         </div>
+        <p class="hero__welcome" data-welcome-output aria-live="polite">点一下“随便看看”，这里会送你一句随机欢迎。</p>
       </div>
       <div class="hero__visual" aria-label="校园与生活照片">
         <div class="hero__photo hero__photo--main">
@@ -32,7 +35,13 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
         <div class="hero__photo hero__photo--small">
           <img src="/images/life/sky.png" alt="云朵缓慢飘过的天空" width="700" height="520" />
         </div>
-        <div class="hero__note-card">今日份：慢一点，也没关系。</div>
+        <button
+          class="hero__note-card"
+          type="button"
+          data-random-mood
+          data-moods={JSON.stringify(dailyMoods)}
+          aria-label="换一句今日心情"
+        >今日份：<span data-mood-text>慢一点，也没关系。</span></button>
       </div>
     </div>
   </section>
@@ -53,7 +62,10 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     <div class="container">
       <SectionHeading eyebrow="RECENT STORIES" title="最近留下的片段" text="生活、学习和项目混在一起，像桌面上还没来得及整理的照片。" />
       <div class="post-grid">{posts.map((post) => <PostCard post={post} />)}</div>
-      <div class="section-end"><a class="button button--soft" href="/search/">看看全部Story</a></div>
+      <div class="section-end section-end--actions">
+        <a class="button button--soft" href="/search/">看看全部Story</a>
+        <RandomStory />
+      </div>
     </div>
   </section>
 
@@ -63,4 +75,26 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
       <PhotoGrid photos={featuredPhotos} />
     </div>
   </section>
+  <script>
+    const welcomeRoot = document.querySelector<HTMLElement>('[data-home-interactions]');
+    const welcomeButton = welcomeRoot?.querySelector<HTMLButtonElement>('[data-random-welcome]');
+    const welcomeOutput = document.querySelector<HTMLElement>('[data-welcome-output]');
+    welcomeButton?.addEventListener('click', () => {
+      const messages = JSON.parse(welcomeRoot?.dataset.welcomes || '[]') as string[];
+      const message = messages[Math.floor(Math.random() * messages.length)];
+      if (welcomeOutput && message) welcomeOutput.textContent = message;
+    });
+
+    const moodButton = document.querySelector<HTMLButtonElement>('[data-random-mood]');
+    const moodText = moodButton?.querySelector<HTMLElement>('[data-mood-text]');
+    const moods = JSON.parse(moodButton?.dataset.moods || '[]') as string[];
+    const updateMood = () => {
+      if (!moodText || moods.length === 0) return;
+      const current = moodText.textContent;
+      const candidates = moods.filter((mood) => mood !== current);
+      moodText.textContent = candidates[Math.floor(Math.random() * candidates.length)] || moods[0];
+    };
+    updateMood();
+    moodButton?.addEventListener('click', updateMood);
+  </script>
 </BaseLayout>

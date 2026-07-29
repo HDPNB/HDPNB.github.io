@@ -2,6 +2,7 @@
 import type { CollectionEntry } from 'astro:content';
 import BaseLayout from './BaseLayout.astro';
 import Giscus from '@/components/Giscus.astro';
+import ArticleReactions from '@/components/ArticleReactions.astro';
 import { formatDate, readingTime } from '@/utils/content';
 
 interface Heading { depth: number; slug: string; text: string; }
@@ -40,6 +41,7 @@ const toc = headings.filter((heading) => heading.depth === 2 || heading.depth ==
     <div class="article-shell">
       <div>
         <div class="prose"><slot /></div>
+        <ArticleReactions slug={post.slug} />
         <nav class="post-nav" aria-label="上一篇和下一篇">
           {previous ? <a href={`/blog/${previous.slug}/`}><span>上一篇</span>{previous.data.title}</a> : <span></span>}
           {next ? <a href={`/blog/${next.slug}/`}><span>下一篇</span>{next.data.title}</a> : <span></span>}

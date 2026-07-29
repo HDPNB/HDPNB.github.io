@@ -1,0 +1,316 @@
+---
+import { musicTracks } from '@/data/music';
+
+const hasTracks = musicTracks.length > 0;
+const firstTrack = musicTracks[0];
+---
+
+<section
+  class:list={['music-player', { 'music-player--empty': !hasTracks }]}
+  data-music-player
+  data-tracks={JSON.stringify(musicTracks)}
+  aria-label="全局音乐播放器"
+>
+  <audio preload="metadata" data-music-audio></audio>
+
+  <div class="music-player__main">
+    <div class="music-player__cover" aria-hidden="true">
+      <img
+        src={firstTrack?.cover || '/images/life/my_day.webp'}
+        alt=""
+        width="96"
+        height="96"
+        data-music-cover
+      />
+      <span>♪</span>
+    </div>
+
+    <div class="music-player__content">
+      <div class="music-player__heading">
+        <div class="music-player__text">
+          <strong data-music-title>{firstTrack?.title || '还没有放进音乐'}</strong>
+          <span data-music-artist>{firstTrack?.artist || '把有权公开播放的音频放到 public/audio/'}</span>
+        </div>
+        <button
+          class="music-icon-button music-list-toggle"
+          type="button"
+          aria-label="展开播放列表"
+          aria-expanded="false"
+          data-music-list-toggle
+        >列表</button>
+      </div>
+
+      <div class="music-player__controls">
+        <button class="music-icon-button" type="button" aria-label="上一首" data-music-prev disabled={!hasTracks}>‹</button>
+        <button class="music-play-button" type="button" aria-label="播放" data-music-play disabled={!hasTracks}>
+          <span data-play-icon aria-hidden="true">▶</span>
+        </button>
+        <button class="music-icon-button" type="button" aria-label="下一首" data-music-next disabled={!hasTracks}>›</button>
+        <div class="music-player__timeline">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="0.1"
+            value="0"
+            aria-label="播放进度"
+            data-music-progress
+            disabled={!hasTracks}
+          />
+          <div><span data-music-current>0:00</span><span data-music-duration>0:00</span></div>
+        </div>
+        <button class="music-icon-button" type="button" aria-label="静音" data-music-mute disabled={!hasTracks}>音</button>
+        <input
+          class="music-player__volume"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value="0.7"
+          aria-label="音量"
+          data-music-volume
+          disabled={!hasTracks}
+        />
+      </div>
+      <p class="music-player__status" data-music-status aria-live="polite">
+        {hasTracks ? '点击播放，声音才会开始。' : '播放器已经准备好，添加音频后即可使用。'}
+      </p>
+    </div>
+  </div>
+
+  <div class="music-playlist" data-music-playlist hidden>
+    <div class="music-playlist__header">
+      <strong>播放列表</strong>
+      <span>{musicTracks.length} 首</span>
+    </div>
+    {hasTracks ? (
+      <ol>
+        {musicTracks.map((track, index) => (
+          <li>
+            <button type="button" data-track-index={index}>
+              <span>{track.title}</span>
+              <small>{track.artist}</small>
+            </button>
+          </li>
+        ))}
+      </ol>
+    ) : (
+      <p class="music-playlist__empty">在 <code>src/data/music.ts</code> 中添加歌曲配置后，这里会显示播放列表。</p>
+    )}
+    <a
+      class="music-qq-link"
+      href={firstTrack?.qqMusicUrl || '#'}
+      target="_blank"
+      rel="noreferrer"
+      data-music-qq
+      hidden={!firstTrack?.qqMusicUrl}
+    >前往QQ音乐收听</a>
+  </div>
+</section>
+
+<script>
+  type Track = {
+    title: string;
+    artist: string;
+    cover: string;
+    src: string;
+    qqMusicUrl?: string;
+  };
+
+  const player = document.querySelector<HTMLElement>('[data-music-player]');
+  const audio = player?.querySelector<HTMLAudioElement>('[data-music-audio]');
+  const tracks = JSON.parse(player?.dataset.tracks || '[]') as Track[];
+
+  if (player && tracks.length === 0) {
+    const emptyToggle = player.querySelector<HTMLButtonElement>('[data-music-list-toggle]');
+    const emptyPlaylist = player.querySelector<HTMLElement>('[data-music-playlist]');
+    emptyToggle?.addEventListener('click', () => {
+      if (!emptyPlaylist) return;
+      const expanded = emptyPlaylist.hidden;
+      emptyPlaylist.hidden = !expanded;
+      emptyToggle.setAttribute('aria-expanded', String(expanded));
+      emptyToggle.setAttribute('aria-label', expanded ? '收起播放列表' : '展开播放列表');
+      document.body.classList.toggle('music-list-open', expanded);
+    });
+  }
+
+  if (player && audio && tracks.length > 0) {
+    const title = player.querySelector<HTMLElement>('[data-music-title]');
+    const artist = player.querySelector<HTMLElement>('[data-music-artist]');
+    const cover = player.querySelector<HTMLImageElement>('[data-music-cover]');
+    const playButton = player.querySelector<HTMLButtonElement>('[data-music-play]');
+    const playIcon = player.querySelector<HTMLElement>('[data-play-icon]');
+    const previousButton = player.querySelector<HTMLButtonElement>('[data-music-prev]');
+    const nextButton = player.querySelector<HTMLButtonElement>('[data-music-next]');
+    const progress = player.querySelector<HTMLInputElement>('[data-music-progress]');
+    const currentTime = player.querySelector<HTMLElement>('[data-music-current]');
+    const duration = player.querySelector<HTMLElement>('[data-music-duration]');
+    const volume = player.querySelector<HTMLInputElement>('[data-music-volume]');
+    const muteButton = player.querySelector<HTMLButtonElement>('[data-music-mute]');
+    const listToggle = player.querySelector<HTMLButtonElement>('[data-music-list-toggle]');
+    const playlist = player.querySelector<HTMLElement>('[data-music-playlist]');
+    const qqLink = player.querySelector<HTMLAnchorElement>('[data-music-qq]');
+    const status = player.querySelector<HTMLElement>('[data-music-status]');
+    const storageKey = 'hdp-music-player';
+
+    const readState = () => {
+      try {
+        return JSON.parse(localStorage.getItem(storageKey) || '{}') as {
+          index?: number;
+          progress?: number;
+          volume?: number;
+          expanded?: boolean;
+        };
+      } catch {
+        return {};
+      }
+    };
+
+    const saved = readState();
+    let index = Math.min(Math.max(saved.index || 0, 0), tracks.length - 1);
+    let pendingTime = Math.max(saved.progress || 0, 0);
+    let lastVolume = typeof saved.volume === 'number' ? Math.min(Math.max(saved.volume, 0), 1) : 0.7;
+    let lastProgressSave = 0;
+
+    const formatTime = (seconds: number) => {
+      if (!Number.isFinite(seconds)) return '0:00';
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
+    };
+
+    const saveState = () => {
+      localStorage.setItem(storageKey, JSON.stringify({
+        index,
+        progress: pendingTime > 0 ? pendingTime : (Number.isFinite(audio.currentTime) ? audio.currentTime : 0),
+        volume: audio.volume,
+        expanded: !playlist?.hidden,
+      }));
+    };
+
+    const updatePlayState = () => {
+      const playing = !audio.paused;
+      if (playIcon) playIcon.textContent = playing ? '❚❚' : '▶';
+      playButton?.setAttribute('aria-label', playing ? '暂停' : '播放');
+      player.classList.toggle('is-playing', playing);
+    };
+
+    const updateTrack = (nextIndex: number, keepSavedTime = false) => {
+      index = (nextIndex + tracks.length) % tracks.length;
+      const track = tracks[index];
+      audio.src = track.src;
+      audio.load();
+      if (title) title.textContent = track.title;
+      if (artist) artist.textContent = track.artist;
+      if (cover) {
+        cover.src = track.cover;
+        cover.alt = `${track.title}封面`;
+      }
+      if (qqLink) {
+        qqLink.hidden = !track.qqMusicUrl;
+        qqLink.href = track.qqMusicUrl || '#';
+      }
+      player.querySelectorAll<HTMLButtonElement>('[data-track-index]').forEach((button) => {
+        const active = Number(button.dataset.trackIndex) === index;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-current', active ? 'true' : 'false');
+      });
+      if (!keepSavedTime) pendingTime = 0;
+      if (status) status.textContent = `已选择《${track.title}》，点击播放后才会发出声音。`;
+      saveState();
+    };
+
+    audio.volume = lastVolume;
+    if (volume) volume.value = String(lastVolume);
+    updateTrack(index, true);
+
+    const setExpanded = (expanded: boolean) => {
+      if (!playlist || !listToggle) return;
+      playlist.hidden = !expanded;
+      document.body.classList.toggle('music-list-open', expanded);
+      listToggle.setAttribute('aria-expanded', String(expanded));
+      listToggle.setAttribute('aria-label', expanded ? '收起播放列表' : '展开播放列表');
+      saveState();
+    };
+    setExpanded(Boolean(saved.expanded));
+
+    playButton?.addEventListener('click', async () => {
+      if (audio.paused) {
+        try {
+          await audio.play();
+          if (status) status.textContent = `正在播放《${tracks[index].title}》`;
+        } catch {
+          if (status) status.textContent = '暂时无法播放，请检查本地音频文件是否存在。';
+        }
+      } else {
+        audio.pause();
+        if (status) status.textContent = '已暂停，进度会保存在这台设备上。';
+      }
+      updatePlayState();
+    });
+
+    const switchTrack = async (nextIndex: number) => {
+      const shouldContinue = !audio.paused;
+      updateTrack(nextIndex);
+      if (shouldContinue) {
+        try { await audio.play(); } catch { updatePlayState(); }
+      }
+    };
+    previousButton?.addEventListener('click', () => switchTrack(index - 1));
+    nextButton?.addEventListener('click', () => switchTrack(index + 1));
+    audio.addEventListener('ended', () => switchTrack(index + 1));
+    audio.addEventListener('play', updatePlayState);
+    audio.addEventListener('pause', updatePlayState);
+
+    audio.addEventListener('loadedmetadata', () => {
+      if (pendingTime > 0 && pendingTime < audio.duration) {
+        audio.currentTime = pendingTime;
+        pendingTime = 0;
+      }
+      if (duration) duration.textContent = formatTime(audio.duration);
+      if (progress) progress.max = String(audio.duration || 100);
+    });
+    audio.addEventListener('timeupdate', () => {
+      if (currentTime) currentTime.textContent = formatTime(audio.currentTime);
+      if (progress && document.activeElement !== progress) progress.value = String(audio.currentTime);
+      if (Date.now() - lastProgressSave > 2000) {
+        saveState();
+        lastProgressSave = Date.now();
+      }
+    });
+
+    progress?.addEventListener('input', () => {
+      audio.currentTime = Number(progress.value);
+      if (currentTime) currentTime.textContent = formatTime(audio.currentTime);
+    });
+    progress?.addEventListener('change', saveState);
+
+    volume?.addEventListener('input', () => {
+      audio.volume = Number(volume.value);
+      audio.muted = false;
+      if (audio.volume > 0) lastVolume = audio.volume;
+      if (muteButton) muteButton.textContent = audio.volume === 0 ? '静' : '音';
+      saveState();
+    });
+    muteButton?.addEventListener('click', () => {
+      if (audio.muted || audio.volume === 0) {
+        audio.muted = false;
+        audio.volume = lastVolume || 0.7;
+      } else {
+        lastVolume = audio.volume;
+        audio.muted = true;
+      }
+      if (volume) volume.value = String(audio.muted ? 0 : audio.volume);
+      muteButton.textContent = audio.muted ? '静' : '音';
+      muteButton.setAttribute('aria-label', audio.muted ? '取消静音' : '静音');
+      saveState();
+    });
+
+    listToggle?.addEventListener('click', () => setExpanded(Boolean(playlist?.hidden)));
+    player.querySelectorAll<HTMLButtonElement>('[data-track-index]').forEach((button) => {
+      button.addEventListener('click', () => switchTrack(Number(button.dataset.trackIndex)));
+    });
+
+    addEventListener('pagehide', saveState);
+    updatePlayState();
+  }
+</script>

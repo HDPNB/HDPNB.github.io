@@ -1,6 +1,7 @@
 ---
 import Header from '@/components/Header.astro';
 import Footer from '@/components/Footer.astro';
+import MusicPlayer from '@/components/MusicPlayer.astro';
 import { siteConfig } from '@/data/site';
 import '@/styles/global.css';
 
@@ -52,13 +53,14 @@ const ogImage = new URL(image, siteConfig.url);
       })();
     </script>
   </head>
-  <body>
+  <body class="page-enter">
     <a class="skip-link" href="#main-content">跳到正文</a>
     <Header />
     <main id="main-content">
       <slot />
     </main>
     <Footer />
+    <MusicPlayer />
     <button class="back-top" type="button" aria-label="返回顶部" title="返回顶部">↑</button>
     <dialog class="lightbox" aria-label="图片大图预览">
       <button class="lightbox__close" type="button" aria-label="关闭大图">×</button>
@@ -98,6 +100,9 @@ const ogImage = new URL(image, siteConfig.url);
       dialog?.querySelector('.lightbox__close')?.addEventListener('click', () => dialog.close());
       dialog?.addEventListener('click', (event) => {
         if (event.target === dialog) dialog.close();
+      });
+      dialog?.addEventListener('close', () => {
+        dialogImage?.removeAttribute('src');
       });
 
       document.querySelectorAll('pre').forEach((pre) => {

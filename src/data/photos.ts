@@ -8,7 +8,7 @@ export const featuredPhotos = [
   { src: '/images/travel/mountain.png', alt: '远处的山与云', caption: '风景会替人保留安静', date: '2026.01' },
   { src: '/images/projects/rk3568.png', alt: '播放器设备', caption: '又一次把想法装进屏幕里', date: '2025.12' },
   {
-  src: '/images/life/my-day.webp',
+  src: '/images/life/my_day.webp',
   alt: '我的日常照片',
   caption: '普普通通但值得记住的一天',
   date: '2026.07'

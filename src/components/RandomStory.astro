@@ -1,0 +1,28 @@
+---
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('blog', ({ data }) => !data.draft))
+  .map((post) => ({ title: post.data.title, href: `/blog/${post.slug}/` }));
+---
+
+<button
+  class="button button--ghost"
+  type="button"
+  data-random-story
+  data-posts={JSON.stringify(posts)}
+  disabled={posts.length === 0}
+>
+  随机Story
+</button>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-random-story]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const posts = JSON.parse(button.dataset.posts || '[]') as { title: string; href: string }[];
+      const candidates = posts.filter((post) => post.href !== location.pathname);
+      const pool = candidates.length > 0 ? candidates : posts;
+      const next = pool[Math.floor(Math.random() * pool.length)];
+      if (next) location.href = next.href;
+    });
+  });
+</script>

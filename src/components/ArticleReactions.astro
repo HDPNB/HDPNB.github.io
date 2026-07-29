@@ -1,0 +1,61 @@
+---
+import { articleReactions } from '@/data/interactions';
+
+interface Props {
+  slug: string;
+}
+
+const { slug } = Astro.props;
+---
+
+<section class="article-reactions" data-article-reactions data-slug={slug} aria-labelledby="reaction-title">
+  <div>
+    <h2 id="reaction-title">读到这里，留个表情吧</h2>
+    <p>回应只保存在当前浏览器，不需要登录。</p>
+  </div>
+  <div class="article-reactions__buttons">
+    {articleReactions.map((reaction) => (
+      <button
+        type="button"
+        data-reaction={reaction.id}
+        aria-pressed="false"
+        aria-label={`回应：${reaction.label}`}
+      >
+        <span aria-hidden="true">{reaction.emoji}</span>
+        <span>{reaction.label}</span>
+      </button>
+    ))}
+  </div>
+  <p class="article-reactions__status" data-reaction-status aria-live="polite"></p>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-article-reactions]').forEach((root) => {
+    const key = `hdp-article-reactions:${root.dataset.slug}`;
+    let selected = new Set<string>();
+    try {
+      selected = new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    } catch {
+      selected = new Set();
+    }
+    const status = root.querySelector<HTMLElement>('[data-reaction-status]');
+    const render = () => {
+      root.querySelectorAll<HTMLButtonElement>('[data-reaction]').forEach((button) => {
+        const active = selected.has(button.dataset.reaction || '');
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    };
+    root.querySelectorAll<HTMLButtonElement>('[data-reaction]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const id = button.dataset.reaction || '';
+        if (selected.has(id)) selected.delete(id);
+        else selected.add(id);
+        localStorage.setItem(key, JSON.stringify([...selected]));
+        if (status) status.textContent = selected.has(id) ? '收到啦，谢谢你的回应。' : '已经取消这个回应。';
+        render();
+      });
+    });
+    render();
+  });
+</script>

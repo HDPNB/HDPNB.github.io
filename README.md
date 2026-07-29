@@ -8,6 +8,7 @@
 .
 ├── .github/workflows/deploy.yml       # GitHub Pages 自动部署
 ├── public/
+│   ├── audio/                         # 有权公开播放的本地音频
 │   ├── files/
 │   ├── images/
 │   │   ├── avatar/
@@ -112,6 +113,24 @@ featured: false
 - `introTags`
 
 导航和页脚文字也集中在同一文件。
+
+## 配置音乐播放器
+
+1. 把你有权公开播放的音频放入 `public/audio/`。
+2. 在 `src/data/music.ts` 的 `musicTracks` 数组中添加歌曲。
+3. `src` 必须是 `/audio/` 开头的本地路径；QQ音乐地址只能填写在可选的 `qqMusicUrl` 中，作为外部跳转。
+
+```ts
+{
+  title: '歌曲名',
+  artist: '艺术家',
+  cover: '/images/life/my_day.webp',
+  src: '/audio/song.mp3',
+  qqMusicUrl: 'https://y.qq.com/...',
+}
+```
+
+播放器不会自动有声播放。当前歌曲、进度、音量和播放列表状态会保存在访客自己的浏览器中。
 
 ## 6. 修改“关于我”
 
