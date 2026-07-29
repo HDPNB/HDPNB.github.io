@@ -3,6 +3,7 @@ export interface MusicTrack {
   artist: string;
   cover: string;
   src: string;
+  tags: string[];
   qqMusicUrl?: string;
 }
 
@@ -16,6 +17,7 @@ export interface MusicTrack {
  *   artist: '艺术家',
  *   cover: '/images/life/my_day.webp',
  *   src: '/audio/song.mp3',
+ *   tags: ['轻音乐', '学习', '放松'],
  *   qqMusicUrl: 'https://y.qq.com/...',
  * }
  */

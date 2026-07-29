@@ -1,4 +1,6 @@
 ---
+import MusicPlayer from '@/components/MusicPlayer.astro';
+import UserMenu from '@/components/UserMenu.astro';
 import { siteConfig } from '@/data/site';
 const path = Astro.url.pathname;
 const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith(href);
@@ -16,6 +18,7 @@ const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith
       ))}
     </nav>
     <div class="nav-actions">
+      <UserMenu />
       <a class="icon-button" href="/search/" aria-label="搜索" title="搜索">⌕</a>
       <button class="icon-button theme-toggle" type="button" aria-label="切换深色模式" title="切换明暗主题">
         <span class="theme-light" aria-hidden="true">☾</span>
@@ -30,6 +33,7 @@ const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith
     ))}
     <a href="/search/">搜索文章</a>
   </nav>
+  <MusicPlayer />
 </header>
 
 <script>

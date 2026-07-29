@@ -12,6 +12,12 @@ export default defineConfig({
       wrap: true,
     },
   },
+  vite: {
+    build: {
+      // CloudBase SDK is loaded as a separate browser-only chunk when interactions are enabled.
+      chunkSizeWarningLimit: 800,
+    },
+  },
   build: {
     format: 'directory',
   },

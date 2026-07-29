@@ -1,0 +1,235 @@
+---
+const cloudBaseEnabled = import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true';
+const cloudBaseEnvId = (import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim();
+const cloudBaseConfigured = cloudBaseEnabled && Boolean(cloudBaseEnvId);
+---
+
+<div class="user-menu" data-user-menu data-configured={String(cloudBaseConfigured)}>
+  <button
+    class="user-menu__trigger"
+    type="button"
+    aria-haspopup="true"
+    aria-controls="visitor-menu-panel"
+    aria-expanded="false"
+    aria-label={cloudBaseConfigured ? '检查游客身份' : '互动功能暂未开启'}
+    disabled={!cloudBaseConfigured}
+    data-user-trigger
+  >
+    <span class="user-menu__badge" aria-hidden="true" data-user-badge>
+      {cloudBaseConfigured ? '访' : '未'}
+    </span>
+    <span class="user-menu__label" data-user-label>
+      {cloudBaseConfigured ? '正在检查…' : '互动功能暂未开启'}
+    </span>
+  </button>
+
+  <section
+    class="user-menu__panel"
+    id="visitor-menu-panel"
+    aria-label="游客身份信息"
+    data-user-panel
+    hidden
+  >
+    <div class="user-menu__heading">
+      <div>
+        <span>当前身份</span>
+        <strong data-user-nickname>匿名访客</strong>
+      </div>
+      <span class="user-menu__identity">游客</span>
+    </div>
+
+    <p class="user-menu__uid">
+      UID：<code data-user-uid>—</code>
+    </p>
+
+    <form class="user-menu__form" data-user-form>
+      <label for="visitor-nickname">修改昵称</label>
+      <div>
+        <input
+          id="visitor-nickname"
+          name="nickname"
+          type="text"
+          minlength="2"
+          maxlength="16"
+          autocomplete="nickname"
+          placeholder="2—16个字符"
+          data-user-input
+        />
+        <button type="submit">保存</button>
+      </div>
+    </form>
+
+    <p class="user-menu__message" aria-live="polite" data-user-message></p>
+    <p class="user-menu__notice">
+      清除浏览器数据或退出后，可能无法恢复当前游客身份。
+    </p>
+    <button class="user-menu__signout" type="button" data-user-signout>
+      退出身份
+    </button>
+  </section>
+  <p class="user-menu__feedback" role="status" data-user-feedback hidden></p>
+</div>
+
+<script>
+  import {
+    restoreVisitorSession,
+    signInAsVisitor,
+    signOutVisitor,
+    updateVisitorNickname,
+  } from '@/lib/auth';
+  import type { VisitorSession } from '@/types/auth';
+
+  const menu = document.querySelector<HTMLElement>('[data-user-menu]');
+  const trigger = menu?.querySelector<HTMLButtonElement>('[data-user-trigger]');
+  const badge = menu?.querySelector<HTMLElement>('[data-user-badge]');
+  const label = menu?.querySelector<HTMLElement>('[data-user-label]');
+  const panel = menu?.querySelector<HTMLElement>('[data-user-panel]');
+  const nickname = menu?.querySelector<HTMLElement>('[data-user-nickname]');
+  const uid = menu?.querySelector<HTMLElement>('[data-user-uid]');
+  const form = menu?.querySelector<HTMLFormElement>('[data-user-form]');
+  const input = menu?.querySelector<HTMLInputElement>('[data-user-input]');
+  const message = menu?.querySelector<HTMLElement>('[data-user-message]');
+  const signout = menu?.querySelector<HTMLButtonElement>('[data-user-signout]');
+  const feedback = menu?.querySelector<HTMLElement>('[data-user-feedback]');
+
+  let session: VisitorSession | null = null;
+  let busy = false;
+
+  const setMessage = (text = '', isError = false) => {
+    if (!message) return;
+    message.textContent = text;
+    message.classList.toggle('is-error', isError);
+  };
+
+  const showFeedback = (text: string) => {
+    if (!feedback) return;
+    feedback.textContent = text;
+    feedback.hidden = false;
+  };
+
+  const setPanel = (open: boolean) => {
+    if (!panel || !trigger || !session) return;
+    panel.hidden = !open;
+    trigger.setAttribute('aria-expanded', String(open));
+    if (open) input?.focus();
+  };
+
+  const renderSignedOut = () => {
+    session = null;
+    if (label) label.textContent = '游客进入';
+    if (badge) badge.textContent = '访';
+    if (trigger) {
+      trigger.disabled = false;
+      trigger.setAttribute('aria-label', '以游客身份进入');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+    if (panel) panel.hidden = true;
+  };
+
+  const renderSession = (nextSession: VisitorSession, open = false) => {
+    session = nextSession;
+    if (label) label.textContent = `你好，${nextSession.nickname}`;
+    if (badge) badge.textContent = nextSession.nickname.slice(0, 1);
+    if (nickname) nickname.textContent = nextSession.nickname;
+    if (uid) uid.textContent = nextSession.shortUid;
+    if (input) input.value = nextSession.nickname;
+    if (trigger) {
+      trigger.disabled = false;
+      trigger.setAttribute('aria-label', `你好，${nextSession.nickname}，打开游客菜单`);
+    }
+    setPanel(open);
+  };
+
+  const setBusy = (nextBusy: boolean, text?: string) => {
+    busy = nextBusy;
+    if (trigger) trigger.disabled = nextBusy;
+    if (text && label) label.textContent = text;
+  };
+
+  const initialize = async () => {
+    if (!menu || menu.dataset.configured !== 'true') return;
+    setBusy(true, '正在检查…');
+    const result = await restoreVisitorSession();
+    setBusy(false);
+    if (result.ok) {
+      renderSession(result.data);
+      return;
+    }
+    if (result.code === 'signed-out') {
+      renderSignedOut();
+      return;
+    }
+    if (label) label.textContent = '互动功能暂不可用';
+    if (badge) badge.textContent = '!';
+    if (trigger) {
+      trigger.disabled = true;
+      trigger.setAttribute('aria-label', result.message);
+    }
+    showFeedback(result.message);
+  };
+
+  trigger?.addEventListener('click', async () => {
+    if (busy) return;
+    if (session) {
+      setPanel(Boolean(panel?.hidden));
+      return;
+    }
+
+    setBusy(true, '正在进入…');
+    const result = await signInAsVisitor();
+    setBusy(false);
+    if (result.ok) {
+      renderSession(result.data, true);
+      setMessage('游客身份已经准备好了。');
+    } else {
+      renderSignedOut();
+      showFeedback(result.message);
+    }
+  });
+
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!session || !input) return;
+    const result = updateVisitorNickname(session.uid, input.value);
+    if (result.ok) {
+      renderSession(result.data, true);
+      setMessage('昵称已经保存在这台设备上。');
+    } else {
+      setMessage(result.message, true);
+    }
+  });
+
+  signout?.addEventListener('click', async () => {
+    if (busy) return;
+    setBusy(true);
+    if (signout) {
+      signout.disabled = true;
+      signout.textContent = '正在退出…';
+    }
+    const result = await signOutVisitor();
+    if (signout) {
+      signout.disabled = false;
+      signout.textContent = '退出身份';
+    }
+    setBusy(false);
+    if (result.ok) {
+      renderSignedOut();
+    } else {
+      setMessage(result.message, true);
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!menu || menu.contains(event.target as Node)) return;
+    setPanel(false);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      setPanel(false);
+      trigger?.focus();
+    }
+  });
+
+  initialize();
+</script>
