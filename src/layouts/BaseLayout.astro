@@ -79,21 +79,30 @@ const ogImage = new URL(image, siteConfig.url);
       const dialog = document.querySelector<HTMLDialogElement>('.lightbox');
       const dialogImage = dialog?.querySelector('img');
       const dialogCaption = dialog?.querySelector('p');
-      document.querySelectorAll<HTMLElement>('[data-lightbox]').forEach((item) => {
-        item.addEventListener('click', () => {
-          const image = item instanceof HTMLImageElement ? item : item.querySelector('img');
-          if (!image || !dialog || !dialogImage || !dialogCaption) return;
-          dialogImage.src = image.currentSrc || image.src;
-          dialogImage.alt = image.alt;
-          dialogCaption.textContent = item.dataset.caption || image.alt;
-          dialog.showModal();
-        });
-        item.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            item.click();
-          }
-        });
+      let lightboxTrigger: HTMLElement | null = null;
+      const openLightbox = (item: HTMLElement) => {
+        const image = item instanceof HTMLImageElement ? item : item.querySelector('img');
+        if (!image || !dialog || !dialogImage || !dialogCaption) return;
+        lightboxTrigger = item;
+        dialogImage.src = image.currentSrc || image.src;
+        dialogImage.alt = image.alt;
+        dialogCaption.textContent = item.dataset.caption || image.alt;
+        dialog.showModal();
+      };
+      document.addEventListener('click', (event) => {
+        const target = event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[data-lightbox]')
+          : null;
+        if (target) openLightbox(target);
+      });
+      document.addEventListener('keydown', (event) => {
+        const target = event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[data-lightbox]')
+          : null;
+        if (target && !(target instanceof HTMLButtonElement) && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          openLightbox(target);
+        }
       });
       dialog?.querySelector('.lightbox__close')?.addEventListener('click', () => dialog.close());
       dialog?.addEventListener('click', (event) => {
@@ -101,6 +110,8 @@ const ogImage = new URL(image, siteConfig.url);
       });
       dialog?.addEventListener('close', () => {
         dialogImage?.removeAttribute('src');
+        lightboxTrigger?.focus();
+        lightboxTrigger = null;
       });
 
       document.querySelectorAll('pre').forEach((pre) => {

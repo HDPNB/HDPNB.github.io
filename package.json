@@ -14,10 +14,12 @@
     "@astrojs/rss": "4.0.19",
     "@astrojs/sitemap": "3.2.1",
     "@cloudbase/js-sdk": "2.32.0",
-    "astro": "4.16.19"
+    "astro": "4.16.19",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "@types/three": "^0.185.1",
     "typescript": "5.9.3"
   }
 }

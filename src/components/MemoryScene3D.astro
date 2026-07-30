@@ -1,0 +1,335 @@
+<div
+  class="memory-scene"
+  data-memory-scene
+  data-state="fallback"
+  aria-label="漂浮的记忆胶囊装饰场景"
+>
+  <canvas class="memory-scene__canvas" data-memory-canvas aria-hidden="true"></canvas>
+  <div class="memory-scene__fallback" aria-hidden="true">
+    <span class="memory-scene__halo"></span>
+    <span class="memory-scene__capsule"></span>
+    <span class="memory-scene__orb memory-scene__orb--one"></span>
+    <span class="memory-scene__orb memory-scene__orb--two"></span>
+    <span class="memory-scene__card memory-scene__card--one"></span>
+    <span class="memory-scene__card memory-scene__card--two"></span>
+  </div>
+  <span class="sr-only" data-memory-status aria-live="polite">
+    正在准备轻量三维场景
+  </span>
+</div>
+
+<script>
+  import type {
+    BufferGeometry,
+    Group,
+    Material,
+    Mesh,
+    PerspectiveCamera,
+    Scene,
+    WebGLRenderer,
+  } from 'three';
+
+  const idleApi = window as unknown as {
+    requestIdleCallback?: (
+      callback: IdleRequestCallback,
+      options?: IdleRequestOptions,
+    ) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  const root = document.querySelector<HTMLElement>('[data-memory-scene]');
+  const canvas = root?.querySelector<HTMLCanvasElement>('[data-memory-canvas]');
+  const status = root?.querySelector<HTMLElement>('[data-memory-status]');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const mobile = window.matchMedia('(max-width: 720px)');
+  const MOTION_STORAGE_KEY = 'hdp-motion-effects';
+
+  let scene: Scene | undefined;
+  let camera: PerspectiveCamera | undefined;
+  let renderer: WebGLRenderer | undefined;
+  let memoryGroup: Group | undefined;
+  let animationFrame = 0;
+  let idleHandle = 0;
+  let initialized = false;
+  let initializing = false;
+  let intersecting = false;
+  let destroyed = false;
+  let pointerX = 0;
+  let pointerY = 0;
+  let lastFrame = 0;
+  let observer: IntersectionObserver | undefined;
+  const geometries: BufferGeometry[] = [];
+  const materials: Material[] = [];
+
+  const effectsEnabled = () => {
+    try {
+      return localStorage.getItem(MOTION_STORAGE_KEY) !== 'off';
+    } catch {
+      return true;
+    }
+  };
+
+  const canAnimate = () =>
+    initialized &&
+    intersecting &&
+    !document.hidden &&
+    !reducedMotion.matches &&
+    effectsEnabled();
+
+  const supportsWebGL = () => {
+    try {
+      const testCanvas = document.createElement('canvas');
+      return Boolean(
+        window.WebGLRenderingContext &&
+          (testCanvas.getContext('webgl2') || testCanvas.getContext('webgl')),
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const setFallback = (message: string) => {
+    if (root) root.dataset.state = 'fallback';
+    if (status) status.textContent = message;
+  };
+
+  const resize = () => {
+    if (!root || !camera || !renderer) return;
+    const rect = root.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    camera.aspect = rect.width / rect.height;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.setSize(rect.width, rect.height, false);
+  };
+
+  const renderFrame = (time = performance.now()) => {
+    if (!renderer || !scene || !camera || !memoryGroup || destroyed) return;
+    if (!canAnimate()) {
+      animationFrame = 0;
+      return;
+    }
+    if (time - lastFrame < 1000 / 30) {
+      animationFrame = requestAnimationFrame(renderFrame);
+      return;
+    }
+    lastFrame = time;
+    const elapsed = time * 0.001;
+    memoryGroup.rotation.y += (pointerX * 0.12 - memoryGroup.rotation.y) * 0.025;
+    memoryGroup.rotation.x += (pointerY * 0.07 - memoryGroup.rotation.x) * 0.025;
+    memoryGroup.position.y = Math.sin(elapsed * 0.52) * 0.11;
+    memoryGroup.children.forEach((child, index) => {
+      child.rotation.z += index % 2 === 0 ? 0.0008 : -0.00065;
+      child.position.y += Math.sin(elapsed * 0.6 + index) * 0.00035;
+    });
+    renderer.render(scene, camera);
+    animationFrame = requestAnimationFrame(renderFrame);
+  };
+
+  const start = () => {
+    if (animationFrame || !canAnimate()) return;
+    animationFrame = requestAnimationFrame(renderFrame);
+  };
+
+  const stop = () => {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+  };
+
+  const initialize = async () => {
+    if (!root || !canvas || initialized || initializing || destroyed) return;
+    if (mobile.matches) {
+      setFallback('手机端使用静态记忆胶囊，以减少性能消耗');
+      return;
+    }
+    if (reducedMotion.matches) {
+      setFallback('已根据系统设置使用静态记忆胶囊');
+      return;
+    }
+    if (!effectsEnabled()) {
+      setFallback('动态效果已关闭，当前显示静态记忆胶囊');
+      return;
+    }
+    if (!supportsWebGL()) {
+      setFallback('浏览器不支持 WebGL，已显示静态记忆胶囊');
+      return;
+    }
+
+    initializing = true;
+    if (status) status.textContent = '正在轻轻展开三维记忆胶囊';
+
+    try {
+      const THREE = await import('three');
+      if (destroyed) return;
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+      camera.position.set(0, 0.1, 8.2);
+
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        alpha: true,
+        antialias: true,
+        powerPreference: 'low-power',
+      });
+      renderer.setClearColor(0x000000, 0);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+
+      memoryGroup = new THREE.Group();
+      scene.add(memoryGroup);
+
+      const add = (
+        geometry: BufferGeometry,
+        material: Material,
+        position: [number, number, number],
+        rotation: [number, number, number] = [0, 0, 0],
+      ) => {
+        const object = new THREE.Mesh(geometry, material) as Mesh;
+        object.position.set(...position);
+        object.rotation.set(...rotation);
+        memoryGroup?.add(object);
+        geometries.push(geometry);
+        materials.push(material);
+        return object;
+      };
+
+      const glass = new THREE.MeshPhysicalMaterial({
+        color: 0x9bad9f,
+        roughness: 0.24,
+        metalness: 0.02,
+        transparent: true,
+        opacity: 0.45,
+        transmission: 0.28,
+        thickness: 0.7,
+      });
+      const mist = new THREE.MeshPhysicalMaterial({
+        color: 0x9eafb4,
+        roughness: 0.42,
+        transparent: true,
+        opacity: 0.7,
+      });
+      const cream = new THREE.MeshStandardMaterial({
+        color: 0xe2d7c5,
+        roughness: 0.72,
+      });
+      const warm = new THREE.MeshStandardMaterial({
+        color: 0xa58e79,
+        roughness: 0.68,
+        transparent: true,
+        opacity: 0.78,
+      });
+
+      add(
+        new THREE.BoxGeometry(2.25, 2.7, 1.55, 2, 2, 2),
+        glass,
+        [0, 0, 0],
+        [0.14, -0.3, 0.08],
+      );
+      add(new THREE.SphereGeometry(0.76, 28, 20), mist, [-1.38, 1.18, -0.2]);
+      add(new THREE.SphereGeometry(0.36, 22, 16), cream, [1.55, -1.15, 0.45]);
+      add(
+        new THREE.TorusGeometry(1.58, 0.055, 12, 72),
+        warm,
+        [0.1, -0.1, -0.62],
+        [1.12, 0.18, -0.3],
+      );
+
+      const cardGeometryOne = new THREE.BoxGeometry(1.25, 1.62, 0.075);
+      const cardGeometryTwo = new THREE.BoxGeometry(1.05, 1.34, 0.065);
+      add(cardGeometryOne, cream, [1.5, 0.96, 0.5], [0.06, -0.34, 0.15]);
+      add(cardGeometryTwo, mist.clone(), [-1.48, -0.98, 0.12], [-0.12, 0.3, -0.16]);
+      materials.push((memoryGroup.children.at(-1) as Mesh).material as Material);
+
+      const light = new THREE.AmbientLight(0xf6f1e7, 2.25);
+      const key = new THREE.DirectionalLight(0xd7e2dc, 3.6);
+      key.position.set(4, 5, 6);
+      const fill = new THREE.DirectionalLight(0xa9bbc1, 1.7);
+      fill.position.set(-5, -2, 4);
+      scene.add(light, key, fill);
+
+      resize();
+      renderer.render(scene, camera);
+      initialized = true;
+      root.dataset.state = 'ready';
+      if (status) status.textContent = '三维记忆胶囊已经准备好';
+      start();
+    } catch {
+      setFallback('三维场景暂时无法加载，已显示静态记忆胶囊');
+    } finally {
+      initializing = false;
+    }
+  };
+
+  const scheduleInitialize = () => {
+    if (initialized || initializing || destroyed || !intersecting) return;
+    if (idleApi.requestIdleCallback) {
+      idleHandle = idleApi.requestIdleCallback(() => initialize(), { timeout: 1200 });
+    } else {
+      idleHandle = window.setTimeout(initialize, 240);
+    }
+  };
+
+  const handlePointer = (event: PointerEvent) => {
+    pointerX = (event.clientX / window.innerWidth - 0.5) * 2;
+    pointerY = (event.clientY / window.innerHeight - 0.5) * 2;
+  };
+
+  const handleStateChange = () => {
+    if (!initialized && effectsEnabled() && !reducedMotion.matches) {
+      scheduleInitialize();
+    }
+    if (canAnimate()) {
+      start();
+    } else {
+      stop();
+    }
+  };
+
+  const cleanup = () => {
+    if (destroyed) return;
+    destroyed = true;
+    stop();
+    observer?.disconnect();
+    window.removeEventListener('resize', resize);
+    window.removeEventListener('pointermove', handlePointer);
+    window.removeEventListener('hdp:motion-changed', handleStateChange);
+    document.removeEventListener('visibilitychange', handleStateChange);
+    reducedMotion.removeEventListener('change', handleStateChange);
+    document.removeEventListener('astro:before-swap', cleanup);
+    window.removeEventListener('pagehide', cleanup);
+    if (idleHandle) {
+      if (idleApi.cancelIdleCallback) idleApi.cancelIdleCallback(idleHandle);
+      else clearTimeout(idleHandle);
+    }
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => material.dispose());
+    renderer?.dispose();
+    renderer?.forceContextLoss();
+    scene?.clear();
+    geometries.length = 0;
+    materials.length = 0;
+  };
+
+  if (root && canvas) {
+    observer = new IntersectionObserver(
+      ([entry]) => {
+        intersecting = Boolean(entry?.isIntersecting);
+        if (intersecting) {
+          scheduleInitialize();
+          start();
+        } else {
+          stop();
+        }
+      },
+      { rootMargin: '120px 0px', threshold: 0.08 },
+    );
+    observer.observe(root);
+    window.addEventListener('resize', resize, { passive: true });
+    window.addEventListener('pointermove', handlePointer, { passive: true });
+    window.addEventListener('hdp:motion-changed', handleStateChange);
+    document.addEventListener('visibilitychange', handleStateChange);
+    reducedMotion.addEventListener('change', handleStateChange);
+    document.addEventListener('astro:before-swap', cleanup, { once: true });
+    window.addEventListener('pagehide', cleanup, { once: true });
+  }
+</script>

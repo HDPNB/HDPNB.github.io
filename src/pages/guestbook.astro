@@ -1,13 +1,14 @@
 ---
 import BaseLayout from '@/layouts/BaseLayout.astro';
 import CloudBaseGuestbook from '@/components/CloudBaseGuestbook.astro';
+import { guestbookConfig } from '@/data/site';
 ---
 
-<BaseLayout title="留言板" description="欢迎留下一句话、一段故事，或者只是来打个招呼。">
+<BaseLayout title="留言板" description={guestbookConfig.description}>
   <header class="page-hero container">
     <span class="eyebrow">GUESTBOOK</span>
-    <h1>欢迎留下你想留下的话。</h1>
-    <p>可以是一句话、一段故事，也可以只是来打个招呼。</p>
+    <h1>{guestbookConfig.title}</h1>
+    <p>{guestbookConfig.description}</p>
   </header>
   <section class="page-section--tight">
     <div class="narrow">

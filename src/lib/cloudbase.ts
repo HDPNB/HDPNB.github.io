@@ -4,10 +4,17 @@ export type CloudBaseApp = ReturnType<CloudBaseSdk['init']>;
 export type CloudBaseAuth = ReturnType<CloudBaseApp['auth']>;
 export type CloudBaseDatabase = ReturnType<CloudBaseApp['database']>;
 
+function createClassicStorage(app: CloudBaseApp) {
+  return app.storage.from();
+}
+
+export type CloudBaseStorage = ReturnType<typeof createClassicStorage>;
+
 export interface CloudBaseClient {
   app: CloudBaseApp;
   auth: CloudBaseAuth;
   database: CloudBaseDatabase;
+  storage: CloudBaseStorage;
 }
 
 export type CloudBaseClientResult =
@@ -63,6 +70,7 @@ export function getCloudBaseClient(): Promise<CloudBaseClientResult> {
             app,
             auth: app.auth(),
             database: app.database(),
+            storage: createClassicStorage(app),
           },
         } satisfies CloudBaseClientResult;
       })

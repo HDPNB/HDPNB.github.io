@@ -1,0 +1,222 @@
+---
+const cloudBaseEnabled =
+  import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
+  Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
+---
+
+<section
+  class="admin-check"
+  data-admin-check
+  data-enabled={String(cloudBaseEnabled)}
+  aria-labelledby="admin-check-title"
+>
+  <div class="admin-check__identity">
+    <span class="admin-check__mark" aria-hidden="true">验</span>
+    <div>
+      <span>当前网站身份</span>
+      <strong data-admin-auth-state>
+        {cloudBaseEnabled ? '正在检查…' : '互动功能暂未开启'}
+      </strong>
+    </div>
+  </div>
+
+  <dl class="admin-check__details">
+    <div>
+      <dt>昵称</dt>
+      <dd data-admin-nickname>—</dd>
+    </div>
+    <div>
+      <dt>身份</dt>
+      <dd data-admin-identity>—</dd>
+    </div>
+    <div>
+      <dt>简化 UID</dt>
+      <dd><code data-admin-uid>—</code></dd>
+    </div>
+  </dl>
+
+  <div class="admin-check__action">
+    <button
+      class="button button--primary"
+      type="button"
+      data-admin-verify
+      disabled={!cloudBaseEnabled}
+      aria-describedby="admin-check-result"
+    >
+      验证管理员身份
+    </button>
+    <p
+      class="admin-check__result"
+      id="admin-check-result"
+      role="status"
+      aria-live="polite"
+      data-admin-result
+    >
+      {cloudBaseEnabled
+        ? '验证只会询问现有云函数，不会在浏览器里保存管理员信息。'
+        : 'CloudBase 未启用，管理员身份检测暂不可用。'}
+    </p>
+  </div>
+
+  <p class="admin-check__privacy">
+    为了保护身份信息，这里只显示经过脱敏的 UID，不展示完整认证数据。
+  </p>
+</section>
+
+<script>
+  import { restoreVisitorSession } from '@/lib/auth';
+  import { getCloudBaseClient } from '@/lib/cloudbase';
+  import { getOrCreateUserProfile } from '@/lib/user-profile';
+  import type { VisitorSession } from '@/types/auth';
+
+  interface AdminPingResult {
+    ok?: boolean;
+    code?: string;
+    message?: string;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-admin-check]');
+  const authState = root?.querySelector<HTMLElement>('[data-admin-auth-state]');
+  const nickname = root?.querySelector<HTMLElement>('[data-admin-nickname]');
+  const identity = root?.querySelector<HTMLElement>('[data-admin-identity]');
+  const uid = root?.querySelector<HTMLElement>('[data-admin-uid]');
+  const verifyButton = root?.querySelector<HTMLButtonElement>('[data-admin-verify]');
+  const resultText = root?.querySelector<HTMLElement>('[data-admin-result]');
+
+  let session: VisitorSession | null = null;
+  let checking = false;
+
+  const setResult = (
+    text: string,
+    state: 'idle' | 'loading' | 'success' | 'error' = 'idle',
+  ) => {
+    if (!resultText) return;
+    resultText.textContent = text;
+    resultText.dataset.state = state;
+  };
+
+  const renderSignedOut = () => {
+    session = null;
+    if (authState) authState.textContent = '尚未进入游客身份';
+    if (nickname) nickname.textContent = '—';
+    if (identity) identity.textContent = '未登录';
+    if (uid) uid.textContent = '—';
+    if (verifyButton) verifyButton.disabled = false;
+  };
+
+  const renderSession = async (nextSession: VisitorSession) => {
+    session = nextSession;
+    const profile = await getOrCreateUserProfile(nextSession.uid);
+    const displayNickname = profile.ok ? profile.data.nickname : nextSession.nickname;
+    if (authState) authState.textContent = '已通过网站身份登录';
+    if (nickname) nickname.textContent = displayNickname;
+    if (identity) identity.textContent = '游客';
+    if (uid) uid.textContent = nextSession.shortUid;
+    if (verifyButton) verifyButton.disabled = false;
+  };
+
+  const refreshIdentity = async () => {
+    if (!root || root.dataset.enabled !== 'true' || checking) return;
+    if (verifyButton) verifyButton.disabled = true;
+    if (authState) authState.textContent = '正在检查…';
+    const restored = await restoreVisitorSession();
+    if (restored.ok) {
+      await renderSession(restored.data);
+      setResult('当前网站身份已就绪，可以进行管理员验证。');
+    } else if (restored.code === 'signed-out') {
+      renderSignedOut();
+    } else {
+      renderSignedOut();
+      if (authState) authState.textContent = '身份状态暂不可用';
+      setResult(restored.message, 'error');
+    }
+  };
+
+  const parsePingResult = (value: unknown): AdminPingResult => {
+    if (typeof value === 'string') {
+      try {
+        return parsePingResult(JSON.parse(value));
+      } catch {
+        return {};
+      }
+    }
+    if (!value || typeof value !== 'object') return {};
+    const record = value as Record<string, unknown>;
+    return {
+      ok: typeof record.ok === 'boolean' ? record.ok : undefined,
+      code: typeof record.code === 'string' ? record.code : undefined,
+      message: typeof record.message === 'string' ? record.message : undefined,
+    };
+  };
+
+  const safeFailureMessage = (code?: string) => {
+    if (code === 'NOT_LOGGED_IN') {
+      return '当前网站身份没有正确传入云函数，请退出后重新进入游客身份。';
+    }
+    if (code === 'NOT_ADMIN') {
+      return '当前 UID 不在管理员名单中。';
+    }
+    return '管理员身份验证没有完成，请稍后再试。';
+  };
+
+  verifyButton?.addEventListener('click', async () => {
+    if (checking || !root || root.dataset.enabled !== 'true') return;
+    if (!session) {
+      setResult('请先在导航栏中以游客身份进入，再进行管理员验证。', 'error');
+      return;
+    }
+
+    checking = true;
+    verifyButton.disabled = true;
+    verifyButton.textContent = '正在验证…';
+    setResult('正在把当前网站身份交给云函数核验…', 'loading');
+
+    try {
+      const cloudbase = await getCloudBaseClient();
+      if (!cloudbase.ok) {
+        setResult(cloudbase.message, 'error');
+        return;
+      }
+
+      const response = await cloudbase.client.app.callFunction({
+        name: 'admin-guestbook',
+        data: { action: 'ping' },
+        parse: true,
+      });
+      const ping = parsePingResult(response.result);
+
+      if (ping.ok === true) {
+        setResult('管理员身份验证成功。', 'success');
+      } else {
+        setResult(safeFailureMessage(ping.code), 'error');
+      }
+    } catch (error) {
+      const detail =
+        error && typeof error === 'object'
+          ? `${'code' in error ? String(error.code) : ''} ${
+              'message' in error ? String(error.message) : ''
+            }`.toLowerCase()
+          : '';
+      const message =
+        detail.includes('not_logged_in')
+          ? '当前网站身份没有正确传入云函数，请退出后重新进入游客身份。'
+          : detail.includes('not_admin')
+            ? '当前 UID 不在管理员名单中。'
+            : detail.includes('permission') || detail.includes('forbidden')
+              ? '管理员验证服务拒绝了当前请求，请稍后联系站长检查调用权限。'
+              : detail.includes('network') || detail.includes('fetch') || detail.includes('timeout')
+          ? '网络连接不太稳定，暂时无法完成验证，请稍后再试。'
+          : '管理员身份验证暂时不可用，请稍后再试。';
+      setResult(message, 'error');
+    } finally {
+      checking = false;
+      verifyButton.disabled = false;
+      verifyButton.textContent = '验证管理员身份';
+    }
+  });
+
+  window.addEventListener('hdp:auth-changed', refreshIdentity);
+  if (root?.dataset.enabled === 'true') {
+    refreshIdentity();
+  }
+</script>

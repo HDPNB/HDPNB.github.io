@@ -4,6 +4,7 @@ import UserMenu from '@/components/UserMenu.astro';
 import { siteConfig } from '@/data/site';
 const path = Astro.url.pathname;
 const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith(href);
+const showMotionToggle = path === '/';
 ---
 
 <header class="site-header" data-header>
@@ -20,6 +21,18 @@ const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith
     <div class="nav-actions">
       <UserMenu />
       <a class="icon-button" href="/search/" aria-label="搜索" title="搜索">⌕</a>
+      {showMotionToggle && (
+        <button
+          class="icon-button motion-toggle"
+          type="button"
+          aria-label="关闭动态效果"
+          aria-pressed="true"
+          title="关闭动态效果"
+          data-motion-toggle
+        >
+          <span aria-hidden="true">✿</span>
+        </button>
+      )}
       <button class="icon-button theme-toggle" type="button" aria-label="切换深色模式" title="切换明暗主题">
         <span class="theme-light" aria-hidden="true">☾</span>
         <span class="theme-dark" aria-hidden="true">☀</span>
@@ -37,6 +50,40 @@ const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith
 </header>
 
 <script>
+  const motionButton = document.querySelector<HTMLButtonElement>('[data-motion-toggle]');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const motionStorageKey = 'hdp-motion-effects';
+
+  const renderMotionButton = () => {
+    if (!motionButton) return;
+    const savedEnabled = localStorage.getItem(motionStorageKey) !== 'off';
+    const effectiveEnabled = savedEnabled && !reducedMotion.matches;
+    const label = reducedMotion.matches
+      ? '系统已启用减少动态效果'
+      : effectiveEnabled
+        ? '关闭动态效果'
+        : '开启动态效果';
+    motionButton.dataset.enabled = String(effectiveEnabled);
+    motionButton.setAttribute('aria-pressed', String(effectiveEnabled));
+    motionButton.setAttribute('aria-label', label);
+    motionButton.title = label;
+    motionButton.disabled = reducedMotion.matches;
+  };
+
+  motionButton?.addEventListener('click', () => {
+    const enabled = localStorage.getItem(motionStorageKey) !== 'off';
+    localStorage.setItem(motionStorageKey, enabled ? 'off' : 'on');
+    renderMotionButton();
+    window.dispatchEvent(new CustomEvent('hdp:motion-changed', {
+      detail: { enabled: !enabled },
+    }));
+  });
+  reducedMotion.addEventListener('change', () => {
+    renderMotionButton();
+    window.dispatchEvent(new CustomEvent('hdp:motion-changed'));
+  });
+  renderMotionButton();
+
   const themeButton = document.querySelector<HTMLButtonElement>('.theme-toggle');
   themeButton?.addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';

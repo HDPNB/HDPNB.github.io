@@ -1,0 +1,321 @@
+---
+import { galleryConfig } from '@/data/site';
+
+const enabled =
+  import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
+  Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
+---
+
+<section
+  class="user-gallery"
+  data-user-gallery
+  data-enabled={String(enabled)}
+  data-public-empty={galleryConfig.publicEmpty}
+  data-own-empty={galleryConfig.ownEmpty}
+>
+  <section class="user-gallery__section" aria-labelledby="public-gallery-title">
+    <div class="user-gallery__heading">
+      <div>
+        <span class="eyebrow">VISITOR GALLERY</span>
+        <h2 id="public-gallery-title">大家留下的照片</h2>
+      </div>
+      <button type="button" data-gallery-public-retry aria-label="刷新公开相册">
+        刷新
+      </button>
+    </div>
+    <div class="gallery-skeleton" data-gallery-public-loading aria-label="正在加载公开相册">
+      {Array.from({ length: 6 }, () => <span></span>)}
+    </div>
+    <div class="gallery-state is-error" data-gallery-public-error hidden>
+      <strong>公开相册暂时没有打开</strong>
+      <p></p>
+      <button class="button button--ghost" type="button" data-gallery-public-retry>
+        再试一次
+      </button>
+    </div>
+    <div class="user-gallery__grid" data-gallery-public-list></div>
+    <p class="gallery-state" data-gallery-public-empty hidden>{galleryConfig.publicEmpty}</p>
+  </section>
+
+  <section class="user-gallery__section user-gallery__section--own" aria-labelledby="own-gallery-title">
+    <div class="user-gallery__heading">
+      <div>
+        <span class="eyebrow">MY PHOTOS</span>
+        <h2 id="own-gallery-title">我的图片</h2>
+      </div>
+      <button type="button" data-gallery-own-retry aria-label="刷新我的图片">
+        刷新
+      </button>
+    </div>
+    <p class="gallery-state gallery-state--quiet" data-gallery-own-login>
+      以游客身份进入后，可以在这里看到自己的待审核、已公开、未通过和仅自己可见图片。
+    </p>
+    <div class="gallery-skeleton" data-gallery-own-loading hidden aria-label="正在加载我的图片">
+      {Array.from({ length: 3 }, () => <span></span>)}
+    </div>
+    <div class="gallery-state is-error" data-gallery-own-error hidden>
+      <strong>自己的图片暂时没有加载出来</strong>
+      <p></p>
+      <button class="button button--ghost" type="button" data-gallery-own-retry>
+        再试一次
+      </button>
+    </div>
+    <div class="user-gallery__grid" data-gallery-own-list></div>
+    <p class="gallery-state" data-gallery-own-empty hidden>{galleryConfig.ownEmpty}</p>
+  </section>
+</section>
+
+<script>
+  import { restoreVisitorSession } from '@/lib/auth';
+  import {
+    loadOwnUserImages,
+    loadPublicUserImages,
+  } from '@/lib/user-images';
+  import type {
+    DisplayUserImage,
+    PublicGalleryImage,
+    UserImageStatus,
+    UserImageVisibility,
+  } from '@/types/user-images';
+
+  const root = document.querySelector<HTMLElement>('[data-user-gallery]');
+  const publicList = root?.querySelector<HTMLElement>('[data-gallery-public-list]');
+  const publicLoading = root?.querySelector<HTMLElement>('[data-gallery-public-loading]');
+  const publicError = root?.querySelector<HTMLElement>('[data-gallery-public-error]');
+  const publicEmpty = root?.querySelector<HTMLElement>('[data-gallery-public-empty]');
+  const ownList = root?.querySelector<HTMLElement>('[data-gallery-own-list]');
+  const ownLoading = root?.querySelector<HTMLElement>('[data-gallery-own-loading]');
+  const ownError = root?.querySelector<HTMLElement>('[data-gallery-own-error]');
+  const ownEmpty = root?.querySelector<HTMLElement>('[data-gallery-own-empty]');
+  const ownLogin = root?.querySelector<HTMLElement>('[data-gallery-own-login]');
+  let publicLoadingActive = false;
+  let ownLoadingActive = false;
+
+  const statusLabels: Record<UserImageStatus, string> = {
+    pending: '等待审核',
+    approved: '已公开',
+    rejected: '未通过审核',
+  };
+
+  interface GalleryCardImage {
+    id: string;
+    nickname: string;
+    description: string;
+    width: number;
+    height: number;
+    createdAt: Date;
+    displayUrl: string | null;
+    visibility?: UserImageVisibility;
+    status?: UserImageStatus;
+  }
+
+  const formatDate = (date: Date) =>
+    new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }).format(date);
+
+  const createCard = (
+    image: GalleryCardImage,
+    own: boolean,
+    reload: () => void,
+  ) => {
+    const article = document.createElement('article');
+    article.className = 'user-image-card';
+
+    const media = document.createElement('button');
+    media.type = 'button';
+    media.className = 'user-image-card__media';
+    media.setAttribute('aria-label', `查看大图：${image.description || '访客照片'}`);
+
+    if (image.displayUrl) {
+      const element = document.createElement('img');
+      element.src = image.displayUrl;
+      element.alt = image.description || `${image.nickname}留下的照片`;
+      element.loading = 'lazy';
+      element.decoding = 'async';
+      element.width = image.width;
+      element.height = image.height;
+      element.addEventListener('error', () => {
+        showImageFailure(media, '图片链接可能已经过期', reload);
+      }, { once: true });
+      media.dataset.lightbox = '';
+      media.dataset.caption = image.description || `${image.nickname}留下的照片`;
+      media.append(element);
+    } else {
+      showImageFailure(media, '图片链接暂时不可用', reload);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'user-image-card__body';
+    const header = document.createElement('header');
+    const author = document.createElement('strong');
+    const time = document.createElement('time');
+    author.textContent = image.nickname;
+    time.dateTime = image.createdAt.toISOString();
+    time.textContent = formatDate(image.createdAt);
+    header.append(author, time);
+
+    const description = document.createElement('p');
+    description.textContent = image.description || '这张照片没有附带说明。';
+    body.append(header, description);
+
+    if (own && image.visibility && image.status) {
+      const state = document.createElement('span');
+      const privateImage = image.visibility === 'private';
+      state.className = `user-image-card__status is-${privateImage ? 'private' : image.status}`;
+      state.textContent = privateImage ? '仅自己可见' : statusLabels[image.status];
+      body.append(state);
+    }
+
+    article.append(media, body);
+    return article;
+  };
+
+  function createImagePlaceholder(text: string) {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'user-image-card__placeholder';
+    const message = document.createElement('span');
+    const retry = document.createElement('span');
+    message.textContent = text;
+    retry.className = 'user-image-card__retry';
+    retry.textContent = '重新加载';
+    placeholder.append(message, retry);
+    return placeholder;
+  }
+
+  function showImageFailure(
+    media: HTMLButtonElement,
+    message: string,
+    reload: () => void,
+  ) {
+    media.removeAttribute('data-lightbox');
+    media.removeAttribute('data-caption');
+    media.setAttribute('aria-label', '重新加载这张图片');
+    media.replaceChildren(createImagePlaceholder(message));
+    media.addEventListener('click', reload, { once: true });
+  }
+
+  const render = (
+    container: HTMLElement | null | undefined,
+    images: GalleryCardImage[],
+    own: boolean,
+    reload: () => void,
+  ) => {
+    if (!container) return;
+    container.replaceChildren(
+      ...images.map((image) => createCard(image, own, reload)),
+    );
+  };
+
+  const publicCard = (image: PublicGalleryImage): GalleryCardImage => ({
+    id: image.id,
+    nickname: image.nickname,
+    description: image.description,
+    width: image.width,
+    height: image.height,
+    createdAt: image.createdAt,
+    displayUrl: image.tempUrl,
+  });
+
+  const ownCard = (image: DisplayUserImage): GalleryCardImage => ({
+    id: image._id,
+    nickname: image.nickname,
+    description: image.description,
+    width: image.width,
+    height: image.height,
+    createdAt: image.createdAt,
+    displayUrl: image.displayUrl,
+    visibility: image.visibility,
+    status: image.status,
+  });
+
+  const showError = (
+    element: HTMLElement | null | undefined,
+    message: string,
+  ) => {
+    if (!element) return;
+    element.hidden = false;
+    const detail = element.querySelector('p');
+    if (detail) detail.textContent = message;
+  };
+
+  const loadPublic = async () => {
+    if (publicLoadingActive) return;
+    publicLoadingActive = true;
+    try {
+      if (!root || root.dataset.enabled !== 'true') {
+        showError(publicError, 'CloudBase 尚未启用，访客相册暂时未开放。');
+        if (publicLoading) publicLoading.hidden = true;
+        return;
+      }
+      if (publicLoading) publicLoading.hidden = false;
+      if (publicError) publicError.hidden = true;
+      if (publicEmpty) publicEmpty.hidden = true;
+      const loaded = await loadPublicUserImages();
+      if (publicLoading) publicLoading.hidden = true;
+      if (!loaded.ok) {
+        render(publicList, [], false, loadPublic);
+        showError(publicError, loaded.message);
+        return;
+      }
+      render(publicList, loaded.data.map(publicCard), false, loadPublic);
+      if (publicEmpty) publicEmpty.hidden = loaded.data.length > 0;
+    } finally {
+      publicLoadingActive = false;
+    }
+  };
+
+  const loadOwn = async () => {
+    if (ownLoadingActive) return;
+    ownLoadingActive = true;
+    try {
+      if (!root || root.dataset.enabled !== 'true') {
+        if (ownLogin) ownLogin.hidden = true;
+        showError(ownError, 'CloudBase 尚未启用，个人图片区域暂时未开放。');
+        return;
+      }
+      const auth = await restoreVisitorSession();
+      if (!auth.ok) {
+        render(ownList, [], true, loadOwn);
+        if (ownLoading) ownLoading.hidden = true;
+        if (ownEmpty) ownEmpty.hidden = true;
+        if (auth.code === 'signed-out') {
+          if (ownLogin) ownLogin.hidden = false;
+          if (ownError) ownError.hidden = true;
+        } else {
+          if (ownLogin) ownLogin.hidden = true;
+          showError(ownError, auth.message);
+        }
+        return;
+      }
+
+      if (ownLogin) ownLogin.hidden = true;
+      if (ownLoading) ownLoading.hidden = false;
+      if (ownError) ownError.hidden = true;
+      if (ownEmpty) ownEmpty.hidden = true;
+      const loaded = await loadOwnUserImages();
+      if (ownLoading) ownLoading.hidden = true;
+      if (!loaded.ok) {
+        render(ownList, [], true, loadOwn);
+        showError(ownError, loaded.message);
+        return;
+      }
+      render(ownList, loaded.data.map(ownCard), true, loadOwn);
+      if (ownEmpty) ownEmpty.hidden = loaded.data.length > 0;
+    } finally {
+      ownLoadingActive = false;
+    }
+  };
+
+  root?.querySelectorAll<HTMLButtonElement>('[data-gallery-public-retry]')
+    .forEach((button) => button.addEventListener('click', loadPublic));
+  root?.querySelectorAll<HTMLButtonElement>('[data-gallery-own-retry]')
+    .forEach((button) => button.addEventListener('click', loadOwn));
+  window.addEventListener('hdp:auth-changed', loadOwn);
+  window.addEventListener('hdp:user-images-changed', loadOwn);
+
+  loadPublic();
+  loadOwn();
+</script>

@@ -1,4 +1,6 @@
 ---
+import { guestbookConfig } from '@/data/site';
+
 const enabled =
   import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
   Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
@@ -8,9 +10,9 @@ const enabled =
   <div class="cloud-guestbook__intro">
     <div>
       <span class="eyebrow">SAY HELLO</span>
-      <h2>说点什么</h2>
+      <h2>{guestbookConfig.composerTitle}</h2>
     </div>
-    <p>新留言会先安静地等一会儿，审核通过后再出现在这里。</p>
+    <p>{guestbookConfig.composerNotice}</p>
   </div>
 
   <div class="cloud-guestbook__unavailable" data-guestbook-unavailable hidden={enabled}>
@@ -30,7 +32,7 @@ const enabled =
         name="content"
         rows="5"
         maxlength="300"
-        placeholder="可以是一句话、一段故事，也可以只是来打个招呼。"
+        placeholder={guestbookConfig.placeholder}
         required
         data-guestbook-content
       ></textarea>

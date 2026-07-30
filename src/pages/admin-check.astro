@@ -1,0 +1,21 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import AdminIdentityCheck from '@/components/AdminIdentityCheck.astro';
+---
+
+<BaseLayout
+  title="管理员身份检测"
+  description="安全检测当前网站身份是否具有留言管理权限。"
+>
+  <header class="page-hero container">
+    <span class="eyebrow">IDENTITY CHECK</span>
+    <h1>管理员身份检测</h1>
+    <p>这里仅用于核验当前网站身份，不会展示管理员名单或完整认证信息。</p>
+  </header>
+
+  <section class="page-section--tight">
+    <div class="narrow">
+      <AdminIdentityCheck />
+    </div>
+  </section>
+</BaseLayout>

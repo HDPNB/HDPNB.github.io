@@ -1,0 +1,27 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import ImageUploader from '@/components/ImageUploader.astro';
+import UserGallery from '@/components/UserGallery.astro';
+import { galleryConfig } from '@/data/site';
+---
+
+<BaseLayout
+  title="光影"
+  description="访客留下的照片，以及那些不一定需要很多文字的生活片段。"
+>
+  <header class="page-hero container gallery-hero">
+    <span class="eyebrow">LIGHT & MOMENTS</span>
+    <h1>{galleryConfig.title}</h1>
+    <div>
+      {galleryConfig.description.map((paragraph) => <p>{paragraph}</p>)}
+    </div>
+  </header>
+
+  <section class="page-section--tight">
+    <div class="container gallery-page">
+      <ImageUploader />
+      <p class="gallery-access-note">{galleryConfig.publicAccessHint}</p>
+      <UserGallery />
+    </div>
+  </section>
+</BaseLayout>

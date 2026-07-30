@@ -1,0 +1,289 @@
+---
+import { galleryConfig } from '@/data/site';
+
+const enabled =
+  import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
+  Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
+---
+
+<section
+  class="image-uploader"
+  data-image-uploader
+  data-enabled={String(enabled)}
+  aria-labelledby="image-upload-title"
+>
+  <div class="image-uploader__heading">
+    <div>
+      <span class="eyebrow">LEAVE A PHOTO</span>
+      <h2 id="image-upload-title">{galleryConfig.uploadTitle}</h2>
+    </div>
+    <p>{galleryConfig.uploadHint}</p>
+  </div>
+
+  <div class="gallery-state gallery-state--quiet" data-upload-unavailable hidden={enabled}>
+    <strong>图片上传暂时未开放</strong>
+    <p>其他页面仍然可以正常浏览，等 CloudBase 准备好再来留下照片。</p>
+  </div>
+
+  <p class="gallery-state gallery-state--quiet" data-upload-login hidden={!enabled}>
+    请先在导航栏中以游客身份进入，之后才能上传图片。
+  </p>
+
+  <form class="image-upload-form" data-upload-form hidden>
+    <div class="image-upload-form__grid">
+      <div class="image-upload-form__picker">
+        <label class="image-upload-form__drop" for="visitor-image">
+          <input
+            id="visitor-image"
+            name="image"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            data-upload-input
+          />
+          <span aria-hidden="true">＋</span>
+          <strong>选择一张照片</strong>
+          <small>JPEG、PNG 或 WebP，原图不超过 5MB</small>
+        </label>
+
+        <figure class="image-upload-form__preview" data-upload-preview hidden>
+          <img src="" alt="待上传图片预览" width="960" height="720" />
+          <figcaption data-upload-file-detail></figcaption>
+        </figure>
+      </div>
+
+      <div class="image-upload-form__fields">
+        <label class="image-upload-form__description">
+          <span>图片描述 <small><span data-upload-count>0</span>/100</small></span>
+          <textarea
+            name="description"
+            rows="4"
+            maxlength="100"
+            placeholder="可以写下拍摄时的天气、心情，或者什么都不写"
+            data-upload-description
+          ></textarea>
+        </label>
+
+        <fieldset>
+          <legend>可见范围</legend>
+          <label>
+            <input type="radio" name="visibility" value="public" checked />
+            <span>
+              <strong>公开展示</strong>
+              <small>先等待审核，通过后才会出现在访客相册</small>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="visibility" value="private" />
+            <span>
+              <strong>仅自己可见</strong>
+              <small>只在当前登录身份的个人图片区域查询</small>
+            </span>
+          </label>
+        </fieldset>
+
+        <p class="image-upload-form__privacy" data-upload-privacy hidden>
+          {galleryConfig.privateHint}
+        </p>
+
+        <div class="image-upload-form__progress" data-upload-progress-wrap hidden>
+          <div>
+            <span data-upload-progress-label>正在准备图片…</span>
+            <strong><span data-upload-progress-value>0</span>%</strong>
+          </div>
+          <progress max="100" value="0" data-upload-progress></progress>
+        </div>
+
+        <div class="image-upload-form__actions">
+          <button class="button button--primary" type="submit" data-upload-submit disabled>
+            上传这张照片
+          </button>
+          <button class="button button--ghost" type="button" data-upload-cancel disabled>
+            取消选择
+          </button>
+        </div>
+        <p class="image-upload-form__result" role="status" aria-live="polite" data-upload-result></p>
+      </div>
+    </div>
+  </form>
+</section>
+
+<script>
+  import { restoreVisitorSession } from '@/lib/auth';
+  import { prepareUserImage, uploadUserImage } from '@/lib/user-images';
+  import type {
+    PreparedUserImage,
+    UserImageVisibility,
+  } from '@/types/user-images';
+
+  const root = document.querySelector<HTMLElement>('[data-image-uploader]');
+  const unavailable = root?.querySelector<HTMLElement>('[data-upload-unavailable]');
+  const login = root?.querySelector<HTMLElement>('[data-upload-login]');
+  const form = root?.querySelector<HTMLFormElement>('[data-upload-form]');
+  const input = root?.querySelector<HTMLInputElement>('[data-upload-input]');
+  const preview = root?.querySelector<HTMLElement>('[data-upload-preview]');
+  const previewImage = preview?.querySelector<HTMLImageElement>('img');
+  const fileDetail = root?.querySelector<HTMLElement>('[data-upload-file-detail]');
+  const description = root?.querySelector<HTMLTextAreaElement>('[data-upload-description]');
+  const count = root?.querySelector<HTMLElement>('[data-upload-count]');
+  const privacy = root?.querySelector<HTMLElement>('[data-upload-privacy]');
+  const submit = root?.querySelector<HTMLButtonElement>('[data-upload-submit]');
+  const cancel = root?.querySelector<HTMLButtonElement>('[data-upload-cancel]');
+  const progressWrap = root?.querySelector<HTMLElement>('[data-upload-progress-wrap]');
+  const progress = root?.querySelector<HTMLProgressElement>('[data-upload-progress]');
+  const progressValue = root?.querySelector<HTMLElement>('[data-upload-progress-value]');
+  const progressLabel = root?.querySelector<HTMLElement>('[data-upload-progress-label]');
+  const result = root?.querySelector<HTMLElement>('[data-upload-result]');
+
+  let prepared: PreparedUserImage | null = null;
+  let previewUrl = '';
+  let busy = false;
+  let signedIn = false;
+
+  const formatSize = (bytes: number) =>
+    bytes >= 1024 * 1024
+      ? `${(bytes / 1024 / 1024).toFixed(2)}MB`
+      : `${Math.max(1, Math.round(bytes / 1024))}KB`;
+
+  const setResult = (text = '', error = false) => {
+    if (!result) return;
+    result.textContent = text;
+    result.classList.toggle('is-error', error);
+  };
+
+  const setProgress = (value: number, label: string) => {
+    if (progressWrap) progressWrap.hidden = false;
+    if (progress) progress.value = value;
+    if (progressValue) progressValue.textContent = String(Math.round(value));
+    if (progressLabel) progressLabel.textContent = label;
+  };
+
+  const setBusy = (nextBusy: boolean) => {
+    busy = nextBusy;
+    form?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>(
+      'input, textarea, button',
+    ).forEach((element) => {
+      element.disabled = nextBusy;
+    });
+    if (!nextBusy) {
+      if (input) input.disabled = false;
+      if (description) description.disabled = false;
+      form?.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach((radio) => {
+        radio.disabled = false;
+      });
+      if (submit) submit.disabled = !prepared;
+      if (cancel) cancel.disabled = !prepared;
+    }
+  };
+
+  const clearSelection = (clearMessage = true) => {
+    prepared = null;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = '';
+    if (previewImage) previewImage.removeAttribute('src');
+    if (preview) preview.hidden = true;
+    if (fileDetail) fileDetail.textContent = '';
+    if (input) input.value = '';
+    if (submit) submit.disabled = true;
+    if (cancel) cancel.disabled = true;
+    if (progressWrap) progressWrap.hidden = true;
+    if (clearMessage) setResult('');
+  };
+
+  const refreshIdentity = async () => {
+    if (!root || root.dataset.enabled !== 'true') return;
+    const auth = await restoreVisitorSession();
+    signedIn = auth.ok;
+    if (login) login.hidden = signedIn;
+    if (form) form.hidden = !signedIn;
+    if (!signedIn) clearSelection();
+  };
+
+  input?.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    clearSelection();
+    if (!file) return;
+
+    setBusy(true);
+    setProgress(12, '正在检查图片…');
+    setResult('正在读取并压缩图片，请稍等。');
+    const preparedResult = await prepareUserImage(file);
+    setBusy(false);
+
+    if (!preparedResult.ok) {
+      setResult(preparedResult.message, true);
+      return;
+    }
+
+    prepared = preparedResult.data;
+    previewUrl = URL.createObjectURL(prepared.blob);
+    if (previewImage) previewImage.src = previewUrl;
+    if (preview) preview.hidden = false;
+    if (fileDetail) {
+      fileDetail.textContent =
+        `${prepared.width} × ${prepared.height} · ` +
+        `${formatSize(prepared.originalSize)} → ${formatSize(prepared.compressedSize)}`;
+    }
+    if (submit) submit.disabled = false;
+    if (cancel) cancel.disabled = false;
+    setProgress(46, '图片压缩完成，等待上传');
+    setResult('图片已经准备好，你可以补充描述并选择可见范围。');
+  });
+
+  description?.addEventListener('input', () => {
+    if (count) count.textContent = String(Array.from(description.value).length);
+  });
+
+  form?.addEventListener('change', () => {
+    const visibility = new FormData(form).get('visibility');
+    if (privacy) privacy.hidden = visibility !== 'private';
+  });
+
+  cancel?.addEventListener('click', () => clearSelection());
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!prepared || !signedIn || busy || !description) return;
+    const visibility =
+      (new FormData(form).get('visibility') as UserImageVisibility | null) ||
+      'public';
+
+    setBusy(true);
+    setResult('');
+    setProgress(52, '正在准备上传…');
+    if (submit) submit.textContent = '正在上传…';
+
+    const upload = await uploadUserImage({
+      image: prepared,
+      description: description.value,
+      visibility,
+      onProgress: setProgress,
+    });
+
+    setBusy(false);
+    if (submit) submit.textContent = '上传这张照片';
+    if (upload.ok) {
+      const message =
+        visibility === 'public'
+          ? '照片已经收到，审核通过后会出现在访客相册中。'
+          : '照片已经收到，可以在“我的图片”中查看当前状态。';
+      clearSelection(false);
+      description.value = '';
+      if (count) count.textContent = '0';
+      setResult(message);
+      window.dispatchEvent(new CustomEvent('hdp:user-images-changed'));
+    } else {
+      setResult(upload.message, true);
+    }
+  });
+
+  window.addEventListener('hdp:auth-changed', refreshIdentity);
+  window.addEventListener('pagehide', () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, { once: true });
+
+  if (root?.dataset.enabled === 'true') {
+    refreshIdentity();
+  } else if (unavailable) {
+    unavailable.hidden = false;
+  }
+</script>

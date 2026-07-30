@@ -1,0 +1,13 @@
+{
+  "name": "public-gallery-images",
+  "version": "1.0.0",
+  "private": true,
+  "description": "为 HDP 的公开相册生成短时有效的图片访问链接",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "3.18.3"
+  }
+}

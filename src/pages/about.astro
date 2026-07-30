@@ -3,10 +3,10 @@ import BaseLayout from '@/layouts/BaseLayout.astro';
 import { aboutConfig } from '@/data/site';
 ---
 
-<BaseLayout title="关于我" description="关于HDP，也关于这个慢慢长大的个人空间。">
+<BaseLayout title="关于我" description={aboutConfig.description}>
   <header class="page-hero container">
     <span class="eyebrow">A LITTLE ABOUT ME</span>
-    <h1>先随便认识一下</h1>
+    <h1>{aboutConfig.pageTitle}</h1>
     <p>{aboutConfig.lead}</p>
   </header>
   <section class="page-section--tight">
