@@ -359,9 +359,7 @@ export async function uploadUserImage(
       input.image.blob,
       {
         contentType: 'image/webp',
-        cacheControl: 'max-age=3600',
         upsert: false,
-        metadata: { source: 'hdp-gallery' },
       },
     );
     if (upload.error) {
