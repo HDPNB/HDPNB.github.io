@@ -1,0 +1,98 @@
+---
+import { dailyFortunes } from '@/data/interactions';
+---
+
+<section
+  class="daily-fortune reveal"
+  data-daily-fortune
+  data-fortunes={JSON.stringify(dailyFortunes)}
+  aria-labelledby="daily-fortune-title"
+>
+  <div>
+    <span class="eyebrow">A NOTE FOR TODAY</span>
+    <h2 id="daily-fortune-title">抽一张今天的签</h2>
+    <p>只是一份轻松的小互动，不是占卜，也不替你预测什么。</p>
+  </div>
+  <article class="daily-fortune__card" data-fortune-card hidden>
+    <span data-fortune-kind></span>
+    <p data-fortune-text aria-live="polite"></p>
+  </article>
+  <div class="daily-fortune__actions">
+    <button class="button button--primary" type="button" data-fortune-draw>
+      抽一张今天的签
+    </button>
+    <button class="text-link" type="button" data-fortune-change hidden>
+      换一句随缘的话
+    </button>
+  </div>
+</section>
+
+<script>
+  interface Fortune {
+    type: string;
+    text: string;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-daily-fortune]');
+  const draw = root?.querySelector<HTMLButtonElement>('[data-fortune-draw]');
+  const change = root?.querySelector<HTMLButtonElement>('[data-fortune-change]');
+  const card = root?.querySelector<HTMLElement>('[data-fortune-card]');
+  const kind = root?.querySelector<HTMLElement>('[data-fortune-kind]');
+  const text = root?.querySelector<HTMLElement>('[data-fortune-text]');
+  const fortunes = JSON.parse(root?.dataset.fortunes || '[]') as Fortune[];
+  const day = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+  }).format(new Date());
+  const storageKey = `hdp-daily-fortune:${day}`;
+  let currentIndex = -1;
+
+  const remember = (index: number) => {
+    try {
+      localStorage.setItem(storageKey, String(index));
+    } catch {
+      // The interaction also works when storage is unavailable.
+    }
+  };
+
+  const show = (index: number) => {
+    const fortune = fortunes[index];
+    if (!fortune || !card || !kind || !text || !draw || !change) return;
+    currentIndex = index;
+    card.classList.remove('is-visible');
+    window.requestAnimationFrame(() => {
+      kind.textContent = fortune.type;
+      text.textContent = fortune.text;
+      card.hidden = false;
+      draw.textContent = '今天的签';
+      draw.disabled = true;
+      change.hidden = false;
+      window.requestAnimationFrame(() => card.classList.add('is-visible'));
+    });
+  };
+
+  const randomIndex = () => {
+    if (fortunes.length <= 1) return 0;
+    let next = Math.floor(Math.random() * fortunes.length);
+    if (next === currentIndex) next = (next + 1) % fortunes.length;
+    return next;
+  };
+
+  draw?.addEventListener('click', () => {
+    if (fortunes.length === 0) return;
+    let saved = -1;
+    try {
+      const value = Number(localStorage.getItem(storageKey));
+      if (Number.isInteger(value) && value >= 0 && value < fortunes.length) saved = value;
+    } catch {
+      // Use a fresh local result when storage is unavailable.
+    }
+    const index = saved >= 0 ? saved : randomIndex();
+    remember(index);
+    show(index);
+  });
+
+  change?.addEventListener('click', () => {
+    if (fortunes.length === 0) return;
+    show(randomIndex());
+  });
+</script>

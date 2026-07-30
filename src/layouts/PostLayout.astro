@@ -16,9 +16,15 @@ interface Props {
 const { post, headings, previous, next } = Astro.props;
 const { title, description, pubDate, updatedDate, category, tags, cover } = post.data;
 const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+const lifeCategories = ['校园生活', '随手记录', '旅行与摄影'];
+const ambient = lifeCategories.includes(category)
+  ? 'life'
+  : category === '项目进展'
+    ? 'projects'
+    : 'learn';
 ---
 
-<BaseLayout title={title} description={description} image={cover} type="article">
+<BaseLayout title={title} description={description} image={cover} type="article" ambient={ambient}>
   <article>
     <header class="article-header narrow">
       <span class="eyebrow">{category}</span>

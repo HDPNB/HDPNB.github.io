@@ -12,6 +12,12 @@ export interface GuestbookMessageDocument {
   repliedAt: Date | null;
 }
 
+export interface GuestbookEncounterMessage {
+  nickname: string;
+  content: string;
+  createdAt: Date;
+}
+
 export type GuestbookResult<T> =
   | { ok: true; data: T }
   | {

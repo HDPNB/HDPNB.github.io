@@ -1,0 +1,605 @@
+---
+import {
+  ambientEffects,
+  resolveAmbientVariant,
+  type AmbientVariant,
+} from '@/data/ambient';
+import { sakuraCollectMessages } from '@/data/interactions';
+
+interface Props {
+  variant?: AmbientVariant;
+}
+
+const variant = Astro.props.variant ?? resolveAmbientVariant(Astro.url.pathname);
+const config = ambientEffects[variant];
+---
+
+<canvas
+  class="page-ambient"
+  data-page-ambient
+  data-config={JSON.stringify(config)}
+  data-collect-messages={JSON.stringify(sakuraCollectMessages)}
+  data-variant={variant}
+  aria-hidden="true"
+></canvas>
+{
+  variant === 'sakura' && (
+    <div
+      class="ambient-collect-toast"
+      data-ambient-collect-toast
+      role="status"
+      aria-live="polite"
+      hidden
+    ></div>
+  )
+}
+
+<script>
+  import type { AmbientEffectConfig } from '@/data/ambient';
+
+  interface AmbientParticle {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    size: number;
+    opacity: number;
+    rotation: number;
+    spin: number;
+    phase: number;
+    layer: number;
+    color: number;
+    label: string;
+    collectible: boolean;
+  }
+
+  interface CollectionState {
+    count: number;
+    completed: boolean;
+    messageIndex?: number;
+  }
+
+  const MOTION_STORAGE_KEY = 'hdp-motion-effects';
+  const COLLECT_STORAGE_PREFIX = 'hdp-sakura-collection';
+  const canvas = document.querySelector<HTMLCanvasElement>('[data-page-ambient]');
+  const context = canvas?.getContext('2d');
+  const toast = document.querySelector<HTMLElement>('[data-ambient-collect-toast]');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const device = navigator as Navigator & { deviceMemory?: number };
+  const config = JSON.parse(canvas?.dataset.config || '{}') as AmbientEffectConfig;
+  const collectMessages = JSON.parse(
+    canvas?.dataset.collectMessages || '[]',
+  ) as string[];
+
+  let width = 0;
+  let height = 0;
+  let pixelRatio = 1;
+  let animationFrame = 0;
+  let lastFrame = 0;
+  let particles: AmbientParticle[] = [];
+  let pageVisible = !document.hidden;
+  let intersecting = true;
+  let destroyed = false;
+  let toastTimer = 0;
+  let resizeObserver: ResizeObserver | undefined;
+  let intersectionObserver: IntersectionObserver | undefined;
+
+  const localDateKey = () => {
+    const now = new Date();
+    return [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+  };
+
+  const collectionKey = `${COLLECT_STORAGE_PREFIX}:${localDateKey()}`;
+  const readCollection = (): CollectionState => {
+    try {
+      const value = JSON.parse(localStorage.getItem(collectionKey) || '{}') as Partial<CollectionState>;
+      return {
+        count: typeof value.count === 'number' ? Math.min(5, Math.max(0, value.count)) : 0,
+        completed: value.completed === true,
+        messageIndex: typeof value.messageIndex === 'number' ? value.messageIndex : undefined,
+      };
+    } catch {
+      return { count: 0, completed: false };
+    }
+  };
+  let collection = readCollection();
+
+  const effectsEnabled = () => {
+    try {
+      return localStorage.getItem(MOTION_STORAGE_KEY) !== 'off' && !reducedMotion.matches;
+    } catch {
+      return !reducedMotion.matches;
+    }
+  };
+
+  const lowPower =
+    (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+    (device.deviceMemory && device.deviceMemory <= 4);
+  const highPower =
+    (navigator.hardwareConcurrency || 0) >= 8 &&
+    (!device.deviceMemory || device.deviceMemory >= 8);
+  const mobile = window.matchMedia('(max-width: 720px)');
+
+  const particleCount = () => {
+    if (mobile.matches) {
+      return lowPower
+        ? Math.max(5, Math.round(config.counts.mobile * 0.65))
+        : config.counts.mobile;
+    }
+    if (lowPower) return config.counts.low;
+    return highPower ? config.counts.high : config.counts.normal;
+  };
+
+  const frameInterval = () => {
+    const capped = lowPower ? Math.min(26, config.maxFps) : config.maxFps;
+    return 1000 / Math.max(20, capped);
+  };
+
+  const createParticle = (index: number, fromEdge = false): AmbientParticle => {
+    const layer = Math.random();
+    const entersFromMiddle =
+      config.variant === 'sakura' && fromEdge && Math.random() < 0.13;
+    const y = fromEdge
+      ? entersFromMiddle
+        ? height * (0.22 + Math.random() * 0.34)
+        : -32 - Math.random() * height * 0.18
+      : Math.random() * height;
+    const baseSize =
+      config.variant === 'learn'
+        ? 9 + Math.random() * 4
+        : config.variant === 'guestbook'
+          ? 7 + Math.random() * 6
+          : 2.8 + Math.random() * 6.2;
+    return {
+      x: Math.random() * width,
+      y,
+      vx: (Math.random() - 0.44) * config.speed * (0.34 + layer * 0.42),
+      vy: (0.16 + Math.random() * 0.42) * config.speed * (0.58 + layer * 0.65),
+      size: baseSize * (0.72 + layer * 0.5),
+      opacity: config.opacity * (0.4 + layer * 0.58),
+      rotation: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 0.012,
+      phase: Math.random() * Math.PI * 2,
+      layer,
+      color: Math.floor(Math.random() * Math.max(1, config.lightColors.length)),
+      label:
+        config.labels[Math.floor(Math.random() * Math.max(1, config.labels.length))] || '',
+      collectible:
+        config.variant === 'sakura' &&
+        !collection.completed &&
+        index % 8 === 0,
+    };
+  };
+
+  const resize = () => {
+    if (!canvas || !context) return;
+    const nextWidth = document.documentElement.clientWidth;
+    const nextHeight = window.innerHeight;
+    if (nextWidth === width && nextHeight === height && particles.length) return;
+    width = nextWidth;
+    height = nextHeight;
+    pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    canvas.width = Math.round(width * pixelRatio);
+    canvas.height = Math.round(height * pixelRatio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    particles = Array.from({ length: particleCount() }, (_, index) =>
+      createParticle(index),
+    );
+  };
+
+  const colorFor = (particle: AmbientParticle) => {
+    const palette =
+      document.documentElement.dataset.theme === 'dark'
+        ? config.darkColors
+        : config.lightColors;
+    return palette[particle.color % palette.length] || '#96a69d';
+  };
+
+  const drawSakura = (particle: AmbientParticle) => {
+    if (!context) return;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.rotate(particle.rotation);
+    context.filter = particle.layer < 0.28 ? 'blur(1.35px)' : particle.layer > 0.8 ? 'blur(.2px)' : 'none';
+    context.scale(particle.size, particle.size);
+    context.beginPath();
+    context.moveTo(0, -0.68);
+    context.bezierCurveTo(0.64, -0.5, 0.74, 0.12, 0, 0.74);
+    context.bezierCurveTo(-0.74, 0.12, -0.64, -0.5, 0, -0.68);
+    context.fillStyle = colorFor(particle);
+    context.globalAlpha = particle.opacity;
+    context.fill();
+    context.restore();
+  };
+
+  const drawLife = (particle: AmbientParticle) => {
+    if (!context) return;
+    const dark = document.documentElement.dataset.theme === 'dark';
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.rotate(particle.rotation);
+    context.globalAlpha = particle.opacity;
+    if (dark) {
+      context.shadowColor = colorFor(particle);
+      context.shadowBlur = particle.size * 2.2;
+      context.fillStyle = colorFor(particle);
+      context.beginPath();
+      context.arc(0, 0, Math.max(1.2, particle.size * 0.3), 0, Math.PI * 2);
+      context.fill();
+    } else {
+      context.scale(particle.size * 0.8, particle.size);
+      context.fillStyle = colorFor(particle);
+      context.beginPath();
+      context.moveTo(0, -0.8);
+      context.quadraticCurveTo(0.68, -0.08, 0, 0.9);
+      context.quadraticCurveTo(-0.68, -0.08, 0, -0.8);
+      context.fill();
+      context.strokeStyle = 'rgba(86, 101, 87, .28)';
+      context.lineWidth = 0.08;
+      context.beginPath();
+      context.moveTo(0, -0.58);
+      context.lineTo(0, 0.72);
+      context.stroke();
+    }
+    context.restore();
+  };
+
+  const drawLearn = (particle: AmbientParticle) => {
+    if (!context || !particle.label) return;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.rotate(Math.sin(particle.phase) * 0.08);
+    context.globalAlpha = particle.opacity;
+    context.fillStyle = colorFor(particle);
+    context.font = `600 ${particle.size}px "Microsoft YaHei", sans-serif`;
+    context.fillText(particle.label, 0, 0);
+    context.restore();
+  };
+
+  const drawProject = (particle: AmbientParticle) => {
+    if (!context) return;
+    const length = 18 + particle.size * 2.3;
+    const pulse = (Math.sin(particle.phase * 1.7) + 1) / 2;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.rotate(particle.rotation * 0.18);
+    context.globalAlpha = particle.opacity;
+    context.strokeStyle = colorFor(particle);
+    context.fillStyle = colorFor(particle);
+    context.lineWidth = 0.75;
+    context.beginPath();
+    context.moveTo(-length / 2, 0);
+    context.lineTo(length / 2, 0);
+    context.stroke();
+    context.beginPath();
+    context.arc(-length / 2, 0, 1.7, 0, Math.PI * 2);
+    context.arc(length / 2, 0, 1.7, 0, Math.PI * 2);
+    context.fill();
+    context.shadowColor = colorFor(particle);
+    context.shadowBlur = 7;
+    context.beginPath();
+    context.arc(-length / 2 + length * pulse, 0, 2.1, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  };
+
+  const drawAbout = (particle: AmbientParticle) => {
+    if (!context) return;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.globalAlpha = particle.opacity;
+    context.fillStyle = colorFor(particle);
+    if (particle.label && particle.color % 3 === 0) {
+      context.font = `500 ${Math.max(8, particle.size * 1.35)}px "Songti SC", serif`;
+      context.fillText(particle.label, 0, 0);
+    } else {
+      context.rotate(particle.rotation);
+      context.beginPath();
+      context.arc(0, 0, Math.max(1, particle.size * 0.3), 0, Math.PI * 2);
+      context.fill();
+      context.fillRect(-0.45, -particle.size, 0.9, particle.size * 2);
+      context.fillRect(-particle.size, -0.45, particle.size * 2, 0.9);
+    }
+    context.restore();
+  };
+
+  const drawGuestbook = (particle: AmbientParticle) => {
+    if (!context) return;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.rotate(particle.rotation * 0.32);
+    context.globalAlpha = particle.opacity;
+    context.strokeStyle = colorFor(particle);
+    context.lineWidth = 1;
+    const size = particle.size;
+    if (particle.color % 2 === 0) {
+      context.beginPath();
+      context.moveTo(-size, -size * 0.5);
+      context.lineTo(size, 0);
+      context.lineTo(-size * 0.42, size * 0.55);
+      context.lineTo(-size * 0.12, 0);
+      context.closePath();
+      context.stroke();
+    } else {
+      context.strokeRect(-size, -size * 0.58, size * 2, size * 1.16);
+      context.beginPath();
+      context.moveTo(-size, -size * 0.58);
+      context.lineTo(0, size * 0.12);
+      context.lineTo(size, -size * 0.58);
+      context.stroke();
+    }
+    context.restore();
+  };
+
+  const drawGallery = (particle: AmbientParticle) => {
+    if (!context) return;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.globalAlpha = particle.opacity;
+    const size = Math.max(2, particle.size);
+    if (particle.color % 3 === 0) {
+      context.strokeStyle = colorFor(particle);
+      context.lineWidth = 0.8;
+      context.strokeRect(-size, -size * 0.72, size * 2, size * 1.44);
+      context.beginPath();
+      context.moveTo(-size * 0.65, size * 0.45);
+      context.lineTo(-size * 0.1, -size * 0.08);
+      context.lineTo(size * 0.62, size * 0.45);
+      context.stroke();
+    } else {
+      const glow = context.createRadialGradient(0, 0, 0, 0, 0, size * 2.4);
+      glow.addColorStop(0, colorFor(particle));
+      glow.addColorStop(1, 'rgba(255,255,255,0)');
+      context.fillStyle = glow;
+      context.beginPath();
+      context.arc(0, 0, size * 2.4, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.restore();
+  };
+
+  const drawStardust = (particle: AmbientParticle) => {
+    if (!context) return;
+    context.save();
+    context.translate(particle.x, particle.y);
+    context.globalAlpha = particle.opacity;
+    context.fillStyle = colorFor(particle);
+    context.beginPath();
+    context.arc(0, 0, Math.max(0.8, particle.size * 0.24), 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  };
+
+  const drawScan = (time: number) => {
+    if (!context) return;
+    const y = ((time * 0.018) % (height + 180)) - 90;
+    const gradient = context.createLinearGradient(0, y - 45, 0, y + 45);
+    gradient.addColorStop(0, 'rgba(128, 155, 134, 0)');
+    gradient.addColorStop(0.5, document.documentElement.dataset.theme === 'dark'
+      ? 'rgba(166, 190, 175, .11)'
+      : 'rgba(112, 145, 127, .08)');
+    gradient.addColorStop(1, 'rgba(128, 155, 134, 0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, y - 45, width, 90);
+  };
+
+  const drawParticle = (particle: AmbientParticle) => {
+    switch (config.variant) {
+      case 'sakura':
+        drawSakura(particle);
+        break;
+      case 'life':
+        drawLife(particle);
+        break;
+      case 'learn':
+        drawLearn(particle);
+        break;
+      case 'projects':
+        drawProject(particle);
+        break;
+      case 'about':
+        drawAbout(particle);
+        break;
+      case 'guestbook':
+        drawGuestbook(particle);
+        break;
+      case 'gallery':
+        drawGallery(particle);
+        break;
+      default:
+        drawStardust(particle);
+    }
+  };
+
+  const resetParticle = (particle: AmbientParticle, index: number) => {
+    Object.assign(particle, createParticle(index, true));
+  };
+
+  const tick = (time: number) => {
+    if (!canvas || !context || destroyed) return;
+    if (!effectsEnabled() || !pageVisible || !intersecting) {
+      animationFrame = 0;
+      return;
+    }
+    if (time - lastFrame < frameInterval()) {
+      animationFrame = requestAnimationFrame(tick);
+      return;
+    }
+    lastFrame = time;
+    context.clearRect(0, 0, width, height);
+
+    if (config.variant === 'scan') {
+      drawScan(time);
+    } else {
+      particles.forEach((particle, index) => {
+        particle.phase += 0.008 + particle.layer * 0.004;
+        particle.rotation += particle.spin;
+        const wind =
+          config.variant === 'sakura'
+            ? 0.14 + Math.sin(time * 0.00018) * 0.08
+            : 0;
+        particle.x += particle.vx + wind + Math.sin(particle.phase) * 0.16;
+        particle.y += particle.vy;
+
+        if (
+          particle.y > height + 45 ||
+          particle.x < -80 ||
+          particle.x > width + 80
+        ) {
+          resetParticle(particle, index);
+        }
+        drawParticle(particle);
+      });
+    }
+    animationFrame = requestAnimationFrame(tick);
+  };
+
+  const stop = () => {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+    context?.clearRect(0, 0, width, height);
+  };
+
+  const start = () => {
+    if (
+      animationFrame ||
+      destroyed ||
+      !effectsEnabled() ||
+      !pageVisible ||
+      !intersecting
+    ) {
+      return;
+    }
+    animationFrame = requestAnimationFrame(tick);
+  };
+
+  const showToast = (message: string, duration = 2800) => {
+    if (!toast) return;
+    clearTimeout(toastTimer);
+    toast.textContent = message;
+    toast.hidden = false;
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+    toastTimer = window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      window.setTimeout(() => {
+        toast.hidden = true;
+      }, 240);
+    }, duration);
+  };
+
+  const saveCollection = () => {
+    try {
+      localStorage.setItem(collectionKey, JSON.stringify(collection));
+    } catch {
+      // This is a device-local optional interaction.
+    }
+  };
+
+  const collectPetal = (event: PointerEvent) => {
+    if (
+      config.variant !== 'sakura' ||
+      collection.completed ||
+      !effectsEnabled() ||
+      !(event.target instanceof Element) ||
+      event.target.closest('button, a, input, textarea, select, [role="button"]')
+    ) {
+      return;
+    }
+    let closestIndex = -1;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    particles.forEach((particle, index) => {
+      if (!particle.collectible) return;
+      const distance = Math.hypot(event.clientX - particle.x, event.clientY - particle.y);
+      if (distance < Math.max(18, particle.size * 2.4) && distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+    if (closestIndex < 0) return;
+
+    collection.count = Math.min(5, collection.count + 1);
+    resetParticle(particles[closestIndex], closestIndex);
+    if (collection.count >= 5) {
+      collection.completed = true;
+      collection.messageIndex =
+        collection.messageIndex ??
+        Math.floor(Math.random() * collectMessages.length);
+      particles.forEach((particle) => {
+        particle.collectible = false;
+      });
+      showToast(
+        collectMessages[collection.messageIndex] || collectMessages[0],
+        5200,
+      );
+    } else {
+      showToast(`接住一片落樱 · ${collection.count}/5`);
+    }
+    saveCollection();
+  };
+
+  const handleVisibility = () => {
+    pageVisible = !document.hidden;
+    if (pageVisible) start();
+    else stop();
+  };
+
+  const handleMotionChange = () => {
+    if (effectsEnabled()) {
+      resize();
+      start();
+    } else {
+      stop();
+    }
+  };
+
+  const cleanup = () => {
+    if (destroyed) return;
+    destroyed = true;
+    stop();
+    clearTimeout(toastTimer);
+    resizeObserver?.disconnect();
+    intersectionObserver?.disconnect();
+    window.removeEventListener('pointerdown', collectPetal);
+    window.removeEventListener('hdp:motion-changed', handleMotionChange);
+    document.removeEventListener('visibilitychange', handleVisibility);
+    reducedMotion.removeEventListener('change', handleMotionChange);
+    document.removeEventListener('astro:before-swap', cleanup);
+    window.removeEventListener('pagehide', cleanup);
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    particles = [];
+  };
+
+  if (canvas && context && config.variant) {
+    resize();
+    resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
+    const main = document.querySelector('main');
+    if (main) {
+      intersectionObserver = new IntersectionObserver(
+        ([entry]) => {
+          intersecting = Boolean(entry?.isIntersecting);
+          if (intersecting) start();
+          else stop();
+        },
+        { threshold: 0 },
+      );
+      intersectionObserver.observe(main);
+    }
+    window.addEventListener('pointerdown', collectPetal, { passive: true });
+    window.addEventListener('hdp:motion-changed', handleMotionChange);
+    document.addEventListener('visibilitychange', handleVisibility);
+    reducedMotion.addEventListener('change', handleMotionChange);
+    document.addEventListener('astro:before-swap', cleanup, { once: true });
+    window.addEventListener('pagehide', cleanup, { once: true });
+    start();
+  }
+</script>

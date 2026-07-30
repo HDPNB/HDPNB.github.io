@@ -1,7 +1,11 @@
 ---
 import Header from '@/components/Header.astro';
 import Footer from '@/components/Footer.astro';
+import PageAmbientEffect from '@/components/PageAmbientEffect.astro';
+import SiteReactions from '@/components/SiteReactions.astro';
 import { siteConfig } from '@/data/site';
+import type { AmbientVariant } from '@/data/ambient';
+import type { SiteReactionPage } from '@/types/site-interactions';
 import '@/styles/global.css';
 
 interface Props {
@@ -9,6 +13,7 @@ interface Props {
   description?: string;
   image?: string;
   type?: 'website' | 'article';
+  ambient?: AmbientVariant;
 }
 
 const {
@@ -16,10 +21,28 @@ const {
   description = siteConfig.description,
   image = '/images/placeholders/og.png',
   type = 'website',
+  ambient,
 } = Astro.props;
 const pageTitle = title === siteConfig.name ? title : `${title}｜${siteConfig.name}`;
 const canonical = new URL(Astro.url.pathname, siteConfig.url);
 const ogImage = new URL(image, siteConfig.url);
+const pathname = Astro.url.pathname;
+const reactionPage: SiteReactionPage | null =
+  pathname === '/'
+    ? 'home'
+    : pathname.startsWith('/life/')
+      ? 'life'
+      : pathname.startsWith('/learn/')
+        ? 'learn'
+        : pathname.startsWith('/projects/')
+          ? 'projects'
+          : pathname === '/about/'
+            ? 'about'
+            : pathname === '/guestbook/'
+              ? 'guestbook'
+              : pathname === '/gallery/'
+                ? 'gallery'
+                : null;
 ---
 
 <!doctype html>
@@ -54,10 +77,16 @@ const ogImage = new URL(image, siteConfig.url);
   </head>
   <body class="page-enter">
     <a class="skip-link" href="#main-content">跳到正文</a>
+    <PageAmbientEffect variant={ambient} />
     <Header />
     <main id="main-content">
       <slot />
     </main>
+    {reactionPage && (
+      <div class="container site-reactions-shell">
+        <SiteReactions page={reactionPage} />
+      </div>
+    )}
     <Footer />
     <button class="back-top" type="button" aria-label="返回顶部" title="返回顶部">↑</button>
     <dialog class="lightbox" aria-label="图片大图预览">

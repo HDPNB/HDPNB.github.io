@@ -1,18 +1,94 @@
+---
+import {
+  memoryCardMessages,
+  memorySceneQuotes,
+} from '@/data/interactions';
+---
+
 <div
   class="memory-scene"
   data-memory-scene
   data-state="fallback"
-  aria-label="漂浮的记忆胶囊装饰场景"
+  data-quotes={JSON.stringify(memorySceneQuotes)}
+  data-cards={JSON.stringify(memoryCardMessages)}
+  aria-label="漂浮的记忆胶囊互动场景"
 >
   <canvas class="memory-scene__canvas" data-memory-canvas aria-hidden="true"></canvas>
-  <div class="memory-scene__fallback" aria-hidden="true">
-    <span class="memory-scene__halo"></span>
-    <span class="memory-scene__capsule"></span>
-    <span class="memory-scene__orb memory-scene__orb--one"></span>
-    <span class="memory-scene__orb memory-scene__orb--two"></span>
-    <span class="memory-scene__card memory-scene__card--one"></span>
-    <span class="memory-scene__card memory-scene__card--two"></span>
+
+  <div class="memory-scene__fallback" aria-hidden="false">
+    <span class="memory-scene__halo" aria-hidden="true"></span>
+    <button
+      class="memory-scene__capsule"
+      type="button"
+      data-memory-trigger="0"
+      aria-label="点亮主要记忆胶囊"
+      title="点亮主要记忆胶囊"
+    ></button>
+    <button
+      class="memory-scene__orb memory-scene__orb--one"
+      type="button"
+      data-memory-trigger="1"
+      aria-label="点亮漂浮的小球"
+      title="点亮漂浮的小球"
+    ></button>
+    <span class="memory-scene__orb memory-scene__orb--two" aria-hidden="true"></span>
+    <button
+      class="memory-scene__card memory-scene__card--one"
+      type="button"
+      data-memory-trigger="2"
+      aria-label="点亮漂浮的日记卡片"
+      title="点亮漂浮的日记卡片"
+    ></button>
+    <span class="memory-scene__card memory-scene__card--two" aria-hidden="true"></span>
   </div>
+
+  <div class="memory-scene__lights" aria-label="点亮三段今日记忆">
+    <span>点亮记忆</span>
+    <div role="group" aria-label="三个记忆对象">
+      {[0, 1, 2].map((index) => (
+        <button
+          type="button"
+          data-memory-trigger={String(index)}
+          data-memory-light={String(index)}
+          aria-label={`点亮第 ${index + 1} 个记忆对象`}
+          aria-pressed="false"
+          title={`点亮第 ${index + 1} 个记忆对象`}
+        ></button>
+      ))}
+    </div>
+    <button
+      class="memory-scene__card-open"
+      type="button"
+      data-memory-card-open
+      hidden
+    >
+      今日记忆卡
+    </button>
+  </div>
+
+  <div
+    class="memory-scene__message"
+    data-memory-message
+    role="status"
+    aria-live="polite"
+    hidden
+  >
+    <button type="button" data-memory-message-close aria-label="关闭记忆短句">×</button>
+    <p data-memory-message-text></p>
+  </div>
+
+  <div
+    class="memory-scene__complete"
+    data-memory-complete
+    role="status"
+    aria-live="polite"
+    hidden
+  >
+    <span>今日记忆卡</span>
+    <p data-memory-complete-text></p>
+    <button type="button" data-memory-complete-close>收好这张卡</button>
+  </div>
+
   <span class="sr-only" data-memory-status aria-live="polite">
     正在准备轻量三维场景
   </span>
@@ -24,10 +100,19 @@
     Group,
     Material,
     Mesh,
+    MeshStandardMaterial,
     PerspectiveCamera,
+    Points,
+    Raycaster,
     Scene,
+    Vector2,
     WebGLRenderer,
   } from 'three';
+
+  interface MemoryState {
+    lit: number[];
+    cardIndex?: number;
+  }
 
   const idleApi = window as unknown as {
     requestIdleCallback?: (
@@ -39,26 +124,91 @@
   const root = document.querySelector<HTMLElement>('[data-memory-scene]');
   const canvas = root?.querySelector<HTMLCanvasElement>('[data-memory-canvas]');
   const status = root?.querySelector<HTMLElement>('[data-memory-status]');
+  const message = root?.querySelector<HTMLElement>('[data-memory-message]');
+  const messageText = root?.querySelector<HTMLElement>('[data-memory-message-text]');
+  const completeCard = root?.querySelector<HTMLElement>('[data-memory-complete]');
+  const completeText = root?.querySelector<HTMLElement>('[data-memory-complete-text]');
+  const cardOpenButton = root?.querySelector<HTMLButtonElement>('[data-memory-card-open]');
+  const quotes = JSON.parse(root?.dataset.quotes || '[]') as string[];
+  const cardMessages = JSON.parse(root?.dataset.cards || '[]') as string[];
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const mobile = window.matchMedia('(max-width: 720px)');
+  const device = navigator as Navigator & { deviceMemory?: number };
+  const lowPower =
+    (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+    (device.deviceMemory && device.deviceMemory <= 4);
   const MOTION_STORAGE_KEY = 'hdp-motion-effects';
+  const MEMORY_STORAGE_PREFIX = 'hdp-memory-lights';
 
   let scene: Scene | undefined;
   let camera: PerspectiveCamera | undefined;
   let renderer: WebGLRenderer | undefined;
-  let memoryGroup: Group | undefined;
+  let backgroundGroup: Group | undefined;
+  let middleGroup: Group | undefined;
+  let foregroundGroup: Group | undefined;
+  let raycaster: Raycaster | undefined;
+  let rayPointer: Vector2 | undefined;
   let animationFrame = 0;
   let idleHandle = 0;
+  let messageTimer = 0;
+  let completeTimer = 0;
   let initialized = false;
   let initializing = false;
   let intersecting = false;
   let destroyed = false;
   let pointerX = 0;
   let pointerY = 0;
+  let dragYaw = 0;
+  let dragPitch = 0;
+  let dragging = false;
+  let activePointerId = -1;
+  let pointerStartX = 0;
+  let pointerStartY = 0;
+  let previousPointerX = 0;
+  let previousPointerY = 0;
+  let dragDistance = 0;
+  let hoverIndex = -1;
   let lastFrame = 0;
+  let lastMessageAt = 0;
   let observer: IntersectionObserver | undefined;
+  let resizeObserver: ResizeObserver | undefined;
   const geometries: BufferGeometry[] = [];
   const materials: Material[] = [];
+  const interactiveObjects: Mesh[] = [];
+
+  const localDateKey = () => {
+    const now = new Date();
+    return [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+  };
+  const memoryStorageKey = `${MEMORY_STORAGE_PREFIX}:${localDateKey()}`;
+
+  const readMemoryState = (): MemoryState => {
+    try {
+      const value = JSON.parse(localStorage.getItem(memoryStorageKey) || '{}') as Partial<MemoryState>;
+      const lit = Array.isArray(value.lit)
+        ? [...new Set(value.lit.filter((item) => Number.isInteger(item) && item >= 0 && item < 3))]
+        : [];
+      return {
+        lit,
+        cardIndex: typeof value.cardIndex === 'number' ? value.cardIndex : undefined,
+      };
+    } catch {
+      return { lit: [] };
+    }
+  };
+  let memoryState = readMemoryState();
+
+  const saveMemoryState = () => {
+    try {
+      localStorage.setItem(memoryStorageKey, JSON.stringify(memoryState));
+    } catch {
+      // This interaction is optional and device-local.
+    }
+  };
 
   const effectsEnabled = () => {
     try {
@@ -87,9 +237,80 @@
     }
   };
 
-  const setFallback = (message: string) => {
+  const setFallback = (text: string) => {
     if (root) root.dataset.state = 'fallback';
-    if (status) status.textContent = message;
+    if (status) status.textContent = text;
+  };
+
+  const renderLights = () => {
+    root?.querySelectorAll<HTMLButtonElement>('[data-memory-light]').forEach((button) => {
+      const index = Number(button.dataset.memoryLight);
+      const active = memoryState.lit.includes(index);
+      button.classList.toggle('is-lit', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    if (cardOpenButton) cardOpenButton.hidden = memoryState.lit.length < 3;
+  };
+
+  const hideMessage = () => {
+    clearTimeout(messageTimer);
+    message?.classList.remove('is-visible');
+    window.setTimeout(() => {
+      if (message) message.hidden = true;
+    }, 260);
+  };
+
+  const showMessage = (text: string) => {
+    if (!message || !messageText || !text) return;
+    clearTimeout(messageTimer);
+    messageText.textContent = text;
+    message.hidden = false;
+    requestAnimationFrame(() => message.classList.add('is-visible'));
+    messageTimer = window.setTimeout(hideMessage, 6500);
+  };
+
+  const revealCompleteCard = () => {
+    if (!completeCard || !completeText || cardMessages.length === 0) return;
+    hideMessage();
+    if (memoryState.cardIndex === undefined) {
+      memoryState.cardIndex = Math.floor(Math.random() * cardMessages.length);
+      saveMemoryState();
+    }
+    completeText.textContent =
+      cardMessages[memoryState.cardIndex % cardMessages.length] ||
+      cardMessages[0];
+    completeCard.hidden = false;
+    requestAnimationFrame(() => completeCard.classList.add('is-visible'));
+  };
+
+  const hideCompleteCard = () => {
+    clearTimeout(completeTimer);
+    completeCard?.classList.remove('is-visible');
+    window.setTimeout(() => {
+      if (completeCard) completeCard.hidden = true;
+    }, 260);
+  };
+
+  const activateMemory = (index: number) => {
+    if (!Number.isInteger(index) || index < 0 || index > 2) return;
+    if (performance.now() - lastMessageAt < 550) return;
+    lastMessageAt = performance.now();
+
+    if (!memoryState.lit.includes(index)) {
+      memoryState.lit.push(index);
+      memoryState.lit.sort();
+      saveMemoryState();
+      renderLights();
+    }
+    const candidates = quotes.filter((_, quoteIndex) => quoteIndex % 3 === index);
+    const source = candidates.length ? candidates : quotes;
+    const quote = source[Math.floor(Math.random() * source.length)];
+    if (quote) showMessage(quote);
+
+    if (memoryState.lit.length === 3) {
+      clearTimeout(completeTimer);
+      completeTimer = window.setTimeout(revealCompleteCard, 900);
+    }
   };
 
   const resize = () => {
@@ -102,25 +323,76 @@
     renderer.setSize(rect.width, rect.height, false);
   };
 
+  const updateInteractiveObjects = () => {
+    interactiveObjects.forEach((object, index) => {
+      const target = index === hoverIndex ? 1.09 : 1;
+      object.scale.x += (target - object.scale.x) * 0.11;
+      object.scale.y += (target - object.scale.y) * 0.11;
+      object.scale.z += (target - object.scale.z) * 0.11;
+      const material = object.material as MeshStandardMaterial;
+      if ('emissiveIntensity' in material) {
+        const intensity = index === hoverIndex ? 0.22 : 0.045;
+        material.emissiveIntensity +=
+          (intensity - material.emissiveIntensity) * 0.1;
+      }
+    });
+  };
+
   const renderFrame = (time = performance.now()) => {
-    if (!renderer || !scene || !camera || !memoryGroup || destroyed) return;
+    if (
+      !renderer ||
+      !scene ||
+      !camera ||
+      !backgroundGroup ||
+      !middleGroup ||
+      !foregroundGroup ||
+      destroyed
+    ) {
+      return;
+    }
     if (!canAnimate()) {
       animationFrame = 0;
       return;
     }
-    if (time - lastFrame < 1000 / 30) {
+
+    const targetFps = lowPower ? 30 : 40;
+    if (time - lastFrame < 1000 / targetFps) {
       animationFrame = requestAnimationFrame(renderFrame);
       return;
     }
     lastFrame = time;
     const elapsed = time * 0.001;
-    memoryGroup.rotation.y += (pointerX * 0.12 - memoryGroup.rotation.y) * 0.025;
-    memoryGroup.rotation.x += (pointerY * 0.07 - memoryGroup.rotation.x) * 0.025;
-    memoryGroup.position.y = Math.sin(elapsed * 0.52) * 0.11;
-    memoryGroup.children.forEach((child, index) => {
-      child.rotation.z += index % 2 === 0 ? 0.0008 : -0.00065;
-      child.position.y += Math.sin(elapsed * 0.6 + index) * 0.00035;
+
+    if (!dragging) {
+      dragYaw *= 0.975;
+      dragPitch *= 0.975;
+    }
+    middleGroup.rotation.y +=
+      (pointerX * 0.2 + dragYaw - middleGroup.rotation.y) * 0.045;
+    middleGroup.rotation.x +=
+      (pointerY * 0.12 + dragPitch - middleGroup.rotation.x) * 0.045;
+    foregroundGroup.rotation.y +=
+      (pointerX * 0.3 + dragYaw * 1.18 - foregroundGroup.rotation.y) * 0.05;
+    foregroundGroup.rotation.x +=
+      (pointerY * 0.17 + dragPitch * 1.18 - foregroundGroup.rotation.x) * 0.05;
+    backgroundGroup.rotation.y +=
+      (-pointerX * 0.08 - backgroundGroup.rotation.y) * 0.025;
+    backgroundGroup.rotation.x +=
+      (-pointerY * 0.04 - backgroundGroup.rotation.x) * 0.025;
+    middleGroup.position.y = Math.sin(elapsed * 0.48) * 0.13;
+    foregroundGroup.position.y = Math.sin(elapsed * 0.62 + 0.7) * 0.17;
+    backgroundGroup.position.y = Math.sin(elapsed * 0.24) * 0.08;
+
+    [...middleGroup.children, ...foregroundGroup.children].forEach((child, index) => {
+      const baseY =
+        typeof child.userData.baseY === 'number'
+          ? child.userData.baseY
+          : child.position.y;
+      child.position.y =
+        baseY + Math.sin(elapsed * (0.48 + (index % 3) * 0.08) + index) * 0.035;
+      child.rotation.z += index % 2 === 0 ? 0.00055 : -0.00042;
     });
+    updateInteractiveObjects();
     renderer.render(scene, camera);
     animationFrame = requestAnimationFrame(renderFrame);
   };
@@ -138,7 +410,11 @@
   const initialize = async () => {
     if (!root || !canvas || initialized || initializing || destroyed) return;
     if (mobile.matches) {
-      setFallback('手机端使用静态记忆胶囊，以减少性能消耗');
+      setFallback('手机端使用可交互的静态记忆胶囊，以减少性能消耗');
+      return;
+    }
+    if (lowPower) {
+      setFallback('当前设备使用可交互的静态记忆胶囊');
       return;
     }
     if (reducedMotion.matches) {
@@ -162,99 +438,238 @@
       if (destroyed) return;
 
       scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
-      camera.position.set(0, 0.1, 8.2);
+      camera = new THREE.PerspectiveCamera(37, 1, 0.1, 100);
+      camera.position.set(0, 0.12, 9.8);
 
       renderer = new THREE.WebGLRenderer({
         canvas,
         alpha: true,
         antialias: true,
-        powerPreference: 'low-power',
+        powerPreference: 'default',
       });
       renderer.setClearColor(0x000000, 0);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.93;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 
-      memoryGroup = new THREE.Group();
-      scene.add(memoryGroup);
+      backgroundGroup = new THREE.Group();
+      middleGroup = new THREE.Group();
+      foregroundGroup = new THREE.Group();
+      scene.add(backgroundGroup, middleGroup, foregroundGroup);
 
-      const add = (
+      const addMesh = (
+        group: Group,
         geometry: BufferGeometry,
         material: Material,
         position: [number, number, number],
         rotation: [number, number, number] = [0, 0, 0],
+        memoryIndex?: number,
       ) => {
         const object = new THREE.Mesh(geometry, material) as Mesh;
         object.position.set(...position);
         object.rotation.set(...rotation);
-        memoryGroup?.add(object);
+        object.userData.baseY = position[1];
+        object.castShadow = true;
+        object.receiveShadow = true;
+        if (memoryIndex !== undefined) {
+          object.userData.memoryIndex = memoryIndex;
+          interactiveObjects.push(object);
+        }
+        group.add(object);
         geometries.push(geometry);
         materials.push(material);
         return object;
       };
 
-      const glass = new THREE.MeshPhysicalMaterial({
-        color: 0x9bad9f,
-        roughness: 0.24,
+      const capsuleMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x93a99a,
+        emissive: 0x5f766a,
+        emissiveIntensity: 0.045,
+        roughness: 0.18,
         metalness: 0.02,
         transparent: true,
-        opacity: 0.45,
-        transmission: 0.28,
-        thickness: 0.7,
+        opacity: 0.68,
+        transmission: 0.34,
+        thickness: 0.9,
+        clearcoat: 0.68,
+        clearcoatRoughness: 0.24,
       });
-      const mist = new THREE.MeshPhysicalMaterial({
-        color: 0x9eafb4,
-        roughness: 0.42,
+      const blueOrbMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x93aeb8,
+        emissive: 0x607b84,
+        emissiveIntensity: 0.045,
+        roughness: 0.22,
+        transparent: true,
+        opacity: 0.82,
+        transmission: 0.16,
+        clearcoat: 0.55,
+      });
+      const paperMaterial = new THREE.MeshStandardMaterial({
+        color: 0xe8dfce,
+        emissive: 0x8c806d,
+        emissiveIntensity: 0.045,
+        roughness: 0.66,
+      });
+      const mistMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0xa4b5b8,
+        roughness: 0.38,
+        transparent: true,
+        opacity: 0.48,
+        transmission: 0.22,
+        side: THREE.DoubleSide,
+      });
+      const warmMaterial = new THREE.MeshStandardMaterial({
+        color: 0xb29a7e,
+        roughness: 0.58,
+        transparent: true,
+        opacity: 0.72,
+      });
+      const greenMaterial = new THREE.MeshStandardMaterial({
+        color: 0x82998a,
+        roughness: 0.48,
         transparent: true,
         opacity: 0.7,
       });
-      const cream = new THREE.MeshStandardMaterial({
-        color: 0xe2d7c5,
-        roughness: 0.72,
-      });
-      const warm = new THREE.MeshStandardMaterial({
-        color: 0xa58e79,
-        roughness: 0.68,
-        transparent: true,
-        opacity: 0.78,
-      });
 
-      add(
-        new THREE.BoxGeometry(2.25, 2.7, 1.55, 2, 2, 2),
-        glass,
+      addMesh(
+        middleGroup,
+        new THREE.BoxGeometry(2.55, 3.05, 1.62, 3, 3, 3),
+        capsuleMaterial,
         [0, 0, 0],
-        [0.14, -0.3, 0.08],
+        [0.12, -0.3, 0.08],
+        0,
       );
-      add(new THREE.SphereGeometry(0.76, 28, 20), mist, [-1.38, 1.18, -0.2]);
-      add(new THREE.SphereGeometry(0.36, 22, 16), cream, [1.55, -1.15, 0.45]);
-      add(
-        new THREE.TorusGeometry(1.58, 0.055, 12, 72),
-        warm,
-        [0.1, -0.1, -0.62],
+      addMesh(
+        foregroundGroup,
+        new THREE.SphereGeometry(0.82, 32, 24),
+        blueOrbMaterial,
+        [-1.72, 1.3, 0.9],
+        [0, 0, 0],
+        1,
+      );
+      addMesh(
+        foregroundGroup,
+        new THREE.BoxGeometry(1.32, 1.72, 0.09),
+        paperMaterial,
+        [1.62, 1.12, 1.02],
+        [0.08, -0.38, 0.13],
+        2,
+      );
+
+      addMesh(
+        middleGroup,
+        new THREE.SphereGeometry(0.4, 24, 18),
+        warmMaterial,
+        [1.74, -1.45, 0.32],
+      );
+      addMesh(
+        middleGroup,
+        new THREE.TorusGeometry(1.83, 0.062, 14, 88),
+        warmMaterial.clone(),
+        [0.08, -0.12, -0.78],
         [1.12, 0.18, -0.3],
       );
 
-      const cardGeometryOne = new THREE.BoxGeometry(1.25, 1.62, 0.075);
-      const cardGeometryTwo = new THREE.BoxGeometry(1.05, 1.34, 0.065);
-      add(cardGeometryOne, cream, [1.5, 0.96, 0.5], [0.06, -0.34, 0.15]);
-      add(cardGeometryTwo, mist.clone(), [-1.48, -0.98, 0.12], [-0.12, 0.3, -0.16]);
-      materials.push((memoryGroup.children.at(-1) as Mesh).material as Material);
+      addMesh(
+        foregroundGroup,
+        new THREE.BoxGeometry(1.08, 1.38, 0.07),
+        greenMaterial,
+        [-1.58, -1.08, 0.62],
+        [-0.12, 0.34, -0.16],
+      );
+      addMesh(
+        middleGroup,
+        new THREE.PlaneGeometry(1.45, 2.15),
+        mistMaterial,
+        [2.05, -0.45, -0.9],
+        [0.08, -0.56, 0.12],
+      );
+      addMesh(
+        backgroundGroup,
+        new THREE.TorusGeometry(2.65, 0.034, 10, 96),
+        greenMaterial.clone(),
+        [-0.15, 0.05, -2.1],
+        [1.35, -0.12, 0.45],
+      );
 
-      const light = new THREE.AmbientLight(0xf6f1e7, 2.25);
-      const key = new THREE.DirectionalLight(0xd7e2dc, 3.6);
-      key.position.set(4, 5, 6);
-      const fill = new THREE.DirectionalLight(0xa9bbc1, 1.7);
-      fill.position.set(-5, -2, 4);
-      scene.add(light, key, fill);
+      for (let index = 0; index < 5; index += 1) {
+        addMesh(
+          backgroundGroup,
+          new THREE.PlaneGeometry(0.58 + index * 0.06, 0.78 + index * 0.05),
+          index % 2 === 0 ? mistMaterial.clone() : paperMaterial.clone(),
+          [
+            -2.7 + index * 1.33,
+            -1.85 + (index % 3) * 1.55,
+            -2.8 - (index % 2) * 0.7,
+          ],
+          [0.1 * index, -0.18 + index * 0.08, -0.22 + index * 0.1],
+        );
+      }
 
+      const starPositions: number[] = [];
+      for (let index = 0; index < 54; index += 1) {
+        starPositions.push(
+          (Math.random() - 0.5) * 7.8,
+          (Math.random() - 0.5) * 5.9,
+          -1.8 - Math.random() * 3.4,
+        );
+      }
+      const starGeometry = new THREE.BufferGeometry();
+      starGeometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(starPositions, 3),
+      );
+      const starMaterial = new THREE.PointsMaterial({
+        color: 0xc7d0c7,
+        size: 0.045,
+        transparent: true,
+        opacity: 0.48,
+        sizeAttenuation: true,
+      });
+      const stars = new THREE.Points(starGeometry, starMaterial) as Points;
+      backgroundGroup.add(stars);
+      geometries.push(starGeometry);
+      materials.push(starMaterial);
+
+      const shadowMaterial = new THREE.ShadowMaterial({
+        color: 0x435047,
+        opacity: 0.14,
+      });
+      const shadowPlane = addMesh(
+        backgroundGroup,
+        new THREE.CircleGeometry(2.35, 48),
+        shadowMaterial,
+        [0, -2.25, -0.2],
+        [-Math.PI / 2, 0, 0],
+      );
+      shadowPlane.castShadow = false;
+
+      const hemisphere = new THREE.HemisphereLight(0xf5f0e5, 0x4c5e55, 2.45);
+      const key = new THREE.DirectionalLight(0xe1ebe3, 4.1);
+      key.position.set(4.6, 6.2, 7.4);
+      key.castShadow = true;
+      key.shadow.mapSize.set(512, 512);
+      key.shadow.camera.near = 1;
+      key.shadow.camera.far = 18;
+      const fill = new THREE.PointLight(0x9ebbc5, 3.1, 13, 2);
+      fill.position.set(-4.2, 1.2, 4.8);
+      const warmPoint = new THREE.PointLight(0xd6b994, 2.5, 10, 2);
+      warmPoint.position.set(3.1, -2.6, 3.8);
+      scene.add(hemisphere, key, fill, warmPoint);
+
+      raycaster = new THREE.Raycaster();
+      rayPointer = new THREE.Vector2();
       resize();
       renderer.render(scene, camera);
       initialized = true;
       root.dataset.state = 'ready';
-      if (status) status.textContent = '三维记忆胶囊已经准备好';
+      if (status) status.textContent = '三维记忆胶囊已经准备好，可以拖动或点亮物体';
       start();
     } catch {
-      setFallback('三维场景暂时无法加载，已显示静态记忆胶囊');
+      setFallback('三维场景暂时无法加载，已显示可交互的静态记忆胶囊');
     } finally {
       initializing = false;
     }
@@ -263,35 +678,127 @@
   const scheduleInitialize = () => {
     if (initialized || initializing || destroyed || !intersecting) return;
     if (idleApi.requestIdleCallback) {
-      idleHandle = idleApi.requestIdleCallback(() => initialize(), { timeout: 1200 });
+      idleHandle = idleApi.requestIdleCallback(() => initialize(), {
+        timeout: 1200,
+      });
     } else {
-      idleHandle = window.setTimeout(initialize, 240);
+      idleHandle = window.setTimeout(initialize, 260);
     }
   };
 
-  const handlePointer = (event: PointerEvent) => {
-    pointerX = (event.clientX / window.innerWidth - 0.5) * 2;
-    pointerY = (event.clientY / window.innerHeight - 0.5) * 2;
+  const updateRaycast = (event: PointerEvent) => {
+    if (!root || !camera || !raycaster || !rayPointer || !initialized) return -1;
+    const rect = root.getBoundingClientRect();
+    rayPointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    rayPointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(rayPointer, camera);
+    const hit = raycaster.intersectObjects(interactiveObjects, false)[0];
+    return hit && typeof hit.object.userData.memoryIndex === 'number'
+      ? hit.object.userData.memoryIndex
+      : -1;
+  };
+
+  const handlePointerMove = (event: PointerEvent) => {
+    if (!root || event.target instanceof Element && event.target.closest('button')) return;
+    const rect = root.getBoundingClientRect();
+    pointerX = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
+    pointerY = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
+    if (dragging && event.pointerId === activePointerId) {
+      const deltaX = event.clientX - previousPointerX;
+      const deltaY = event.clientY - previousPointerY;
+      dragYaw = Math.max(-0.52, Math.min(0.52, dragYaw + deltaX * 0.0045));
+      dragPitch = Math.max(-0.28, Math.min(0.28, dragPitch + deltaY * 0.0035));
+      dragDistance += Math.abs(deltaX) + Math.abs(deltaY);
+      previousPointerX = event.clientX;
+      previousPointerY = event.clientY;
+    } else {
+      hoverIndex = updateRaycast(event);
+      root.classList.toggle('is-object-hovered', hoverIndex >= 0);
+    }
+  };
+
+  const handlePointerDown = (event: PointerEvent) => {
+    if (!root || event.target !== canvas || !initialized) return;
+    dragging = true;
+    activePointerId = event.pointerId;
+    pointerStartX = event.clientX;
+    pointerStartY = event.clientY;
+    previousPointerX = event.clientX;
+    previousPointerY = event.clientY;
+    dragDistance = 0;
+    root.setPointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerUp = (event: PointerEvent) => {
+    if (!root || !dragging || event.pointerId !== activePointerId) return;
+    if (
+      dragDistance < 8 &&
+      Math.hypot(
+        event.clientX - pointerStartX,
+        event.clientY - pointerStartY,
+      ) < 8
+    ) {
+      const memoryIndex = updateRaycast(event);
+      if (memoryIndex >= 0) activateMemory(memoryIndex);
+    }
+    dragging = false;
+    activePointerId = -1;
+    root.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerLeave = () => {
+    pointerX = 0;
+    pointerY = 0;
+    hoverIndex = -1;
+    dragging = false;
+    activePointerId = -1;
+    root?.classList.remove('is-object-hovered');
+  };
+
+  const handleRootClick = (event: MouseEvent) => {
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest('[data-memory-message-close]')) {
+      hideMessage();
+      return;
+    }
+    if (event.target.closest('[data-memory-complete-close]')) {
+      hideCompleteCard();
+      return;
+    }
+    if (event.target.closest('[data-memory-card-open]')) {
+      revealCompleteCard();
+      return;
+    }
+    const trigger = event.target.closest<HTMLElement>('[data-memory-trigger]');
+    if (trigger) activateMemory(Number(trigger.dataset.memoryTrigger));
   };
 
   const handleStateChange = () => {
     if (!initialized && effectsEnabled() && !reducedMotion.matches) {
       scheduleInitialize();
     }
-    if (canAnimate()) {
-      start();
-    } else {
-      stop();
+    if (initialized && root) {
+      root.dataset.state =
+        effectsEnabled() && !reducedMotion.matches ? 'ready' : 'fallback';
     }
+    if (canAnimate()) start();
+    else stop();
   };
 
   const cleanup = () => {
     if (destroyed) return;
     destroyed = true;
     stop();
+    clearTimeout(messageTimer);
+    clearTimeout(completeTimer);
     observer?.disconnect();
-    window.removeEventListener('resize', resize);
-    window.removeEventListener('pointermove', handlePointer);
+    resizeObserver?.disconnect();
+    root?.removeEventListener('pointermove', handlePointerMove);
+    root?.removeEventListener('pointerdown', handlePointerDown);
+    root?.removeEventListener('pointerup', handlePointerUp);
+    root?.removeEventListener('pointercancel', handlePointerUp);
+    root?.removeEventListener('pointerleave', handlePointerLeave);
+    root?.removeEventListener('click', handleRootClick);
     window.removeEventListener('hdp:motion-changed', handleStateChange);
     document.removeEventListener('visibilitychange', handleStateChange);
     reducedMotion.removeEventListener('change', handleStateChange);
@@ -308,9 +815,12 @@
     scene?.clear();
     geometries.length = 0;
     materials.length = 0;
+    interactiveObjects.length = 0;
   };
 
   if (root && canvas) {
+    renderLights();
+
     observer = new IntersectionObserver(
       ([entry]) => {
         intersecting = Boolean(entry?.isIntersecting);
@@ -321,11 +831,17 @@
           stop();
         }
       },
-      { rootMargin: '120px 0px', threshold: 0.08 },
+      { rootMargin: '140px 0px', threshold: 0.08 },
     );
     observer.observe(root);
-    window.addEventListener('resize', resize, { passive: true });
-    window.addEventListener('pointermove', handlePointer, { passive: true });
+    resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(root);
+    root.addEventListener('pointermove', handlePointerMove, { passive: true });
+    root.addEventListener('pointerdown', handlePointerDown);
+    root.addEventListener('pointerup', handlePointerUp);
+    root.addEventListener('pointercancel', handlePointerUp);
+    root.addEventListener('pointerleave', handlePointerLeave);
+    root.addEventListener('click', handleRootClick);
     window.addEventListener('hdp:motion-changed', handleStateChange);
     document.addEventListener('visibilitychange', handleStateChange);
     reducedMotion.addEventListener('change', handleStateChange);

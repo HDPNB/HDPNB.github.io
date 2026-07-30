@@ -5,8 +5,9 @@ import SectionHeading from '@/components/SectionHeading.astro';
 import PostCard from '@/components/PostCard.astro';
 import PhotoGrid from '@/components/PhotoGrid.astro';
 import RandomStory from '@/components/RandomStory.astro';
-import SakuraEffect from '@/components/SakuraEffect.astro';
 import MemoryScene3D from '@/components/MemoryScene3D.astro';
+import DailyFortune from '@/components/DailyFortune.astro';
+import GuestbookEncounter from '@/components/GuestbookEncounter.astro';
 import { siteConfig } from '@/data/site';
 import { featuredPhotos } from '@/data/photos';
 import { dailyMoods, welcomeMessages } from '@/data/interactions';
@@ -17,7 +18,6 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
 ---
 
 <BaseLayout title={siteConfig.name} description={siteConfig.description}>
-  <SakuraEffect />
   <section class="hero">
     <div class="container hero__grid">
       <div class="hero__copy">
@@ -61,6 +61,12 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     </div>
   </section>
 
+  <section class="page-section--tight">
+    <div class="container">
+      <DailyFortune />
+    </div>
+  </section>
+
   <section class="page-section" id="recent">
     <div class="container">
       <SectionHeading eyebrow="RECENT STORIES" title="最近留下的片段" text={siteConfig.recentText} />
@@ -69,6 +75,12 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
         <a class="button button--soft" href="/search/">看看全部Story</a>
         <RandomStory />
       </div>
+    </div>
+  </section>
+
+  <section class="page-section--tight">
+    <div class="container">
+      <GuestbookEncounter />
     </div>
   </section>
 

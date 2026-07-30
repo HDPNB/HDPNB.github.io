@@ -4,6 +4,7 @@ import {
 } from '@/lib/cloudbase';
 import { getOrCreateUserProfile } from '@/lib/user-profile';
 import type {
+  GuestbookEncounterMessage,
   GuestbookMessageDocument,
   GuestbookResult,
   GuestbookStatus,
@@ -160,6 +161,56 @@ export async function loadGuestbookMessages(): Promise<
         (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       ),
     };
+  } catch {
+    return databaseFailure();
+  }
+}
+
+export async function loadApprovedGuestbookEncounters(): Promise<
+  GuestbookResult<GuestbookEncounterMessage[]>
+> {
+  const cloudbase = await getCloudBaseClient();
+  if (!cloudbase.ok) {
+    return {
+      ok: false,
+      code: 'disabled',
+      message: '留言功能暂时未开放。',
+    };
+  }
+
+  try {
+    const result = await cloudbase.client.database
+      .collection(COLLECTION)
+      .where({ status: 'approved' })
+      .field({
+        nickname: true,
+        content: true,
+        createdAt: true,
+      })
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .get();
+
+    const messages = result.data.flatMap((value) => {
+      if (!value || typeof value !== 'object') return [];
+      const item = value as Record<string, unknown>;
+      if (
+        typeof item.nickname !== 'string' ||
+        typeof item.content !== 'string'
+      ) {
+        return [];
+      }
+      const nickname = item.nickname.trim();
+      const content = item.content.trim();
+      if (!nickname || !content) return [];
+      return [{
+        nickname,
+        content,
+        createdAt: parseDate(item.createdAt),
+      }];
+    });
+
+    return { ok: true, data: messages };
   } catch {
     return databaseFailure();
   }

@@ -1,0 +1,166 @@
+---
+import { resonanceOptions } from '@/data/interactions';
+import type { SiteReactionPage } from '@/types/site-interactions';
+
+interface Props {
+  page: SiteReactionPage;
+}
+
+const { page } = Astro.props;
+const enabled =
+  import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
+  Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
+---
+
+<section
+  class="site-reactions"
+  data-site-reactions
+  data-page={page}
+  data-enabled={String(enabled)}
+  aria-labelledby={`site-reactions-${page}`}
+>
+  <div class="site-reactions__intro">
+    <span class="eyebrow">TODAY'S ECHO</span>
+    <h2 id={`site-reactions-${page}`}>今天路过这里时，你有什么感觉？</h2>
+    <p>不显示访客名单，只留下一点真实的共鸣。</p>
+  </div>
+  <div class="site-reactions__buttons" role="group" aria-label="选择今日共鸣">
+    {resonanceOptions.map((option) => (
+      <button
+        type="button"
+        data-site-reaction={option.id}
+        aria-label={`选择${option.label}`}
+        aria-pressed="false"
+        title={`留下${option.label}的共鸣`}
+        disabled
+      >
+        <span aria-hidden="true">{option.emoji}</span>
+        <span>{option.label}</span>
+        <strong data-site-reaction-count={option.id}>—</strong>
+      </button>
+    ))}
+  </div>
+  <div class="site-reactions__feedback">
+    <p data-site-reactions-status aria-live="polite">正在看看今天留下了哪些共鸣…</p>
+    <button
+      class="text-link"
+      type="button"
+      data-site-reactions-retry
+      hidden
+    >
+      再连接一次
+    </button>
+  </div>
+</section>
+
+<script>
+  import { restoreVisitorSession } from '@/lib/auth';
+  import {
+    getSiteReactions,
+    leaveSiteReaction,
+  } from '@/lib/site-interactions';
+  import type {
+    SiteReactionId,
+    SiteReactionPage,
+    SiteReactionState,
+  } from '@/types/site-interactions';
+
+  const root = document.querySelector<HTMLElement>('[data-site-reactions]');
+  const status = root?.querySelector<HTMLElement>('[data-site-reactions-status]');
+  const retry = root?.querySelector<HTMLButtonElement>('[data-site-reactions-retry]');
+  const buttons = Array.from(
+    root?.querySelectorAll<HTMLButtonElement>('[data-site-reaction]') || [],
+  );
+  const page = root?.dataset.page as SiteReactionPage | undefined;
+  let busy = false;
+  let signedIn = false;
+
+  const setStatus = (message: string, showRetry = false) => {
+    if (status) status.textContent = message;
+    if (retry) retry.hidden = !showRetry;
+  };
+
+  const setDisabled = (disabled: boolean) => {
+    buttons.forEach((button) => {
+      button.disabled = disabled;
+    });
+  };
+
+  const render = (state: SiteReactionState) => {
+    buttons.forEach((button) => {
+      const id = button.dataset.siteReaction as SiteReactionId;
+      const active = state.currentReaction === id;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+      const count = button.querySelector<HTMLElement>('[data-site-reaction-count]');
+      if (count) count.textContent = String(state.counts[id]);
+    });
+    setStatus(
+      state.currentReaction
+        ? '已留下今天的共鸣。今天之内还可以换一种心情。'
+        : '选一个此刻最接近你的感觉吧。',
+    );
+  };
+
+  const load = async () => {
+    if (busy || !root || !page) return;
+    if (root.dataset.enabled !== 'true') {
+      setDisabled(true);
+      setStatus('互动暂时没有连接上。', true);
+      return;
+    }
+    busy = true;
+    setDisabled(true);
+    setStatus('正在看看今天留下了哪些共鸣…');
+    try {
+      const auth = await restoreVisitorSession();
+      if (!auth.ok) {
+        signedIn = false;
+        setStatus(
+          auth.code === 'signed-out'
+            ? '以游客身份进入后，就可以留下今天的共鸣。'
+            : '互动暂时没有连接上。',
+          auth.code !== 'signed-out',
+        );
+        return;
+      }
+      signedIn = true;
+      const result = await getSiteReactions(page);
+      if (!result.ok) {
+        setStatus(result.message, result.code !== 'signed-out');
+        return;
+      }
+      render(result.data);
+      setDisabled(false);
+    } finally {
+      busy = false;
+    }
+  };
+
+  buttons.forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (busy || !signedIn || !page) return;
+      const reaction = button.dataset.siteReaction as SiteReactionId;
+      busy = true;
+      setDisabled(true);
+      button.classList.add('is-bouncing');
+      window.setTimeout(() => button.classList.remove('is-bouncing'), 360);
+      setStatus('正在留下这份共鸣…');
+      try {
+        const result = await leaveSiteReaction(page, reaction);
+        if (!result.ok) {
+          setStatus(result.message, result.code === 'unavailable');
+          return;
+        }
+        render(result.data);
+      } finally {
+        busy = false;
+        if (signedIn) setDisabled(false);
+      }
+    });
+  });
+
+  retry?.addEventListener('click', load);
+  window.addEventListener('hdp:auth-changed', load);
+  load();
+</script>

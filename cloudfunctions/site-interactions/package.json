@@ -1,0 +1,13 @@
+{
+  "name": "site-interactions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HDP个人空间的真实每日共鸣互动",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "3.18.3"
+  }
+}
