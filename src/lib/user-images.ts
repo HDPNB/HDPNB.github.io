@@ -355,13 +355,9 @@ export async function uploadUserImage(
 
     input.onProgress?.(58, '正在上传压缩后的图片…');
     const upload = await cloudbase.client.storage.upload(
-      cloudPath,
-      input.image.blob,
-      {
-        contentType: 'image/webp',
-        upsert: false,
-      },
-    );
+  cloudPath,
+  input.image.blob,
+);
     if (upload.error) {
       return failure('storage-error', '图片没有上传成功，请稍后再试。');
     }
