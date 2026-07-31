@@ -1,0 +1,40 @@
+---
+const primary = [
+  { href: '/star-wall/', icon: '✦', title: '星空墙', text: '把一句话变成一颗等待公开的星', kind: 'stars' },
+  { href: '/drift-bottle/', icon: '⌁', title: '漂流瓶', text: '投下一张纸条，也捞起陌生人的片刻', kind: 'water' },
+  { href: '/time-capsule/', icon: '◷', title: '时光胶囊', text: '把一段话交给未来的自己', kind: 'time' },
+  { href: '/answer-book/', icon: '▤', title: '答案之书', text: '翻到一页轻松的思考提示', kind: 'book' },
+] as const;
+
+const existing = [
+  { href: '/#daily-fortune-title', title: '今日抽签' },
+  { href: '/#main-content', title: '今日记忆卡' },
+  { href: '/#site-reactions', title: '今日共鸣' },
+  { href: '/guestbook/', title: '留言板' },
+  { href: '/gallery/', title: '访客图库' },
+] as const;
+---
+
+<section class="interaction-hub" aria-labelledby="interaction-hub-title">
+  <header>
+    <span class="eyebrow">SMALL INTERACTIONS</span>
+    <h1 id="interaction-hub-title">互动角落</h1>
+    <p>这里放着几件很轻的小事。没有排行榜，也不需要赶着完成</p>
+  </header>
+  <div class="interaction-hub__grid">
+    {primary.map((item) => (
+      <a class:list={['interaction-entry', `interaction-entry--${item.kind}`]} href={item.href}>
+        <span aria-hidden="true">{item.icon}</span>
+        <div>
+          <h2>{item.title}</h2>
+          <p>{item.text}</p>
+        </div>
+        <small>慢慢打开 →</small>
+      </a>
+    ))}
+  </div>
+  <div class="interaction-hub__existing">
+    <h2>原来就在这里的小互动</h2>
+    <div>{existing.map((item) => <a href={item.href}>{item.title}</a>)}</div>
+  </div>
+</section>

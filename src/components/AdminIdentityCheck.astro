@@ -216,7 +216,12 @@ const cloudBaseEnabled =
   });
 
   window.addEventListener('hdp:auth-changed', refreshIdentity);
+  const cleanup = () => {
+    window.removeEventListener('hdp:auth-changed', refreshIdentity);
+  };
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+  window.addEventListener('pagehide', cleanup, { once: true });
   if (root?.dataset.enabled === 'true') {
-    refreshIdentity();
+    void refreshIdentity();
   }
 </script>

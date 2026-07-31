@@ -1,0 +1,99 @@
+---
+import { answerBookEntries } from '@/data/answer-book';
+---
+
+<section
+  class="answer-book"
+  data-answer-book
+  data-answers={JSON.stringify(answerBookEntries)}
+  aria-labelledby="answer-book-heading"
+>
+  <div class="answer-book__intro">
+    <span class="eyebrow">A QUIET ANSWER</span>
+    <h1 id="answer-book-heading">答案之书</h1>
+    <p>先写下正在想的问题。问题不会上传，也不会保存，答案只是一种轻松的思考角度</p>
+  </div>
+  <label class="interaction-field">
+    <span>正在想的问题</span>
+    <textarea
+      maxlength="60"
+      rows="3"
+      placeholder="写在这里，或者只在心里想一遍"
+      data-answer-question
+    ></textarea>
+    <small><span data-answer-count>0</span>/60</small>
+  </label>
+  <div class="answer-book__book" data-answer-result aria-live="polite">
+    <div>
+      <span data-answer-category>答案还夹在下一页</span>
+      <p data-answer-text>准备好以后，再轻轻翻开</p>
+      <small data-answer-hint>它不是占卜，也不会替你做重要决定</small>
+    </div>
+  </div>
+  <div class="interaction-actions">
+    <button class="button button--primary" type="button" data-answer-open>翻开答案</button>
+    <button class="button button--ghost" type="button" data-answer-copy disabled>复制答案</button>
+  </div>
+  <p class="interaction-status" data-answer-status aria-live="polite"></p>
+</section>
+
+<script>
+  import type { AnswerBookEntry } from '@/data/answer-book';
+  import { entryRandom, pickRandom } from '@/lib/random';
+
+  const root = document.querySelector<HTMLElement>('[data-answer-book]');
+  const input = root?.querySelector<HTMLTextAreaElement>('[data-answer-question]');
+  const count = root?.querySelector<HTMLElement>('[data-answer-count]');
+  const open = root?.querySelector<HTMLButtonElement>('[data-answer-open]');
+  const copy = root?.querySelector<HTMLButtonElement>('[data-answer-copy]');
+  const result = root?.querySelector<HTMLElement>('[data-answer-result]');
+  const category = root?.querySelector<HTMLElement>('[data-answer-category]');
+  const text = root?.querySelector<HTMLElement>('[data-answer-text]');
+  const hint = root?.querySelector<HTMLElement>('[data-answer-hint]');
+  const status = root?.querySelector<HTMLElement>('[data-answer-status]');
+  const answers = JSON.parse(root?.dataset.answers || '[]') as AnswerBookEntry[];
+  const random = entryRandom('answer-book');
+  let lastIndex = -1;
+  let currentAnswer = '';
+  let busy = false;
+
+  input?.addEventListener('input', () => {
+    if (count) count.textContent = String(input.value.length);
+  });
+
+  open?.addEventListener('click', () => {
+    if (busy || answers.length === 0) return;
+    busy = true;
+    open.disabled = true;
+    result?.classList.remove('is-open');
+    const picked = pickRandom(answers, random, lastIndex);
+    lastIndex = picked.index;
+    window.setTimeout(() => {
+      if (picked.value && category && text && hint) {
+        category.textContent = picked.value.category;
+        text.textContent = picked.value.answer;
+        hint.textContent = picked.value.hint;
+        currentAnswer = `${picked.value.answer}\n${picked.value.hint}`;
+        copy && (copy.disabled = false);
+        result?.classList.add('is-open');
+        if (status) status.textContent = '问题没有离开这个页面，答案也只是随手翻到的一页';
+      }
+      busy = false;
+      open.disabled = false;
+      open.textContent = '再问一次';
+    }, 360);
+  });
+
+  copy?.addEventListener('click', async () => {
+    if (!currentAnswer || !copy) return;
+    try {
+      await navigator.clipboard.writeText(currentAnswer);
+      copy.textContent = '已经复制';
+      window.setTimeout(() => {
+        copy.textContent = '复制答案';
+      }, 1400);
+    } catch {
+      if (status) status.textContent = '暂时没能复制，可以手动选中文字';
+    }
+  });
+</script>

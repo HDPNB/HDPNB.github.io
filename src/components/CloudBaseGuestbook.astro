@@ -82,8 +82,8 @@ const enabled =
 
   const statusLabels: Record<GuestbookStatus, string> = {
     approved: '已公开',
-    pending: '等待审核',
-    rejected: '未通过审核',
+    pending: '等待公开',
+    rejected: '暂未公开',
   };
 
   const formatDate = (date: Date) =>
@@ -187,7 +187,7 @@ const enabled =
     if (result.ok) {
       textarea.value = '';
       if (count) count.textContent = '0';
-      setStatus('留言已经收到，审核通过后会公开显示。');
+      setStatus('留言已经收到，确认适合公开后会出现在这里。');
       await loadMessages();
     } else {
       setStatus(result.message, true);

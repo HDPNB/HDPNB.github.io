@@ -1,0 +1,14 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import AdminContent from '@/components/AdminContent.astro';
+---
+
+<BaseLayout
+  title="内容管理"
+  description="受保护的站点内容管理入口"
+  noindex={true}
+>
+  <div class="container interaction-page">
+    <AdminContent />
+  </div>
+</BaseLayout>

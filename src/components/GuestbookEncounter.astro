@@ -32,6 +32,7 @@ const enabled =
 
 <script>
   import { loadApprovedGuestbookEncounters } from '@/lib/guestbook';
+  import { entryRandom } from '@/lib/random';
   import type { GuestbookEncounterMessage } from '@/types/guestbook';
 
   const root = document.querySelector<HTMLElement>('[data-guestbook-encounter]');
@@ -44,6 +45,7 @@ const enabled =
   let messages: GuestbookEncounterMessage[] | null = null;
   let lastIndex = -1;
   let busy = false;
+  const random = entryRandom('guestbook-encounter');
 
   const formatDate = (date: Date) =>
     new Intl.DateTimeFormat('zh-CN', {
@@ -54,7 +56,7 @@ const enabled =
 
   const chooseIndex = (length: number) => {
     if (length <= 1) return 0;
-    let next = Math.floor(Math.random() * length);
+    let next = Math.floor(random() * length);
     if (next === lastIndex) next = (next + 1) % length;
     return next;
   };

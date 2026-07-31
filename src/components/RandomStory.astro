@@ -16,12 +16,16 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
 </button>
 
 <script>
+  import { entryRandom } from '@/lib/random';
+
+  const random = entryRandom('random-story');
+
   document.querySelectorAll<HTMLButtonElement>('[data-random-story]').forEach((button) => {
     button.addEventListener('click', () => {
       const posts = JSON.parse(button.dataset.posts || '[]') as { title: string; href: string }[];
       const candidates = posts.filter((post) => post.href !== location.pathname);
       const pool = candidates.length > 0 ? candidates : posts;
-      const next = pool[Math.floor(Math.random() * pool.length)];
+      const next = pool[Math.floor(random() * pool.length)];
       if (next) location.href = next.href;
     });
   });

@@ -69,7 +69,7 @@ const enabled =
             <input type="radio" name="visibility" value="public" checked />
             <span>
               <strong>公开展示</strong>
-              <small>先等待审核，通过后才会出现在访客相册</small>
+              <small>照片确认公开后，才会出现在访客相册</small>
             </span>
           </label>
           <label>
@@ -264,7 +264,7 @@ const enabled =
     if (upload.ok) {
       const message =
         visibility === 'public'
-          ? '照片已经收到，审核通过后会出现在访客相册中。'
+          ? '照片已经收到，确认公开后会出现在访客相册中。'
           : '照片已经收到，可以在“我的图片”中查看当前状态。';
       clearSelection(false);
       description.value = '';

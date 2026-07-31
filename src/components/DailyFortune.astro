@@ -1,33 +1,47 @@
 ---
 import { dailyFortunes } from '@/data/interactions';
+import {
+  fortuneExchangeCopies,
+} from '@/data/copywriting';
 ---
 
 <section
   class="daily-fortune reveal"
   data-daily-fortune
   data-fortunes={JSON.stringify(dailyFortunes)}
+  data-exchanges={JSON.stringify(fortuneExchangeCopies)}
   aria-labelledby="daily-fortune-title"
 >
   <div>
     <span class="eyebrow">A NOTE FOR TODAY</span>
     <h2 id="daily-fortune-title">抽一张今天的签</h2>
-    <p>只是一份轻松的小互动，不是占卜，也不替你预测什么。</p>
+    <p>每天可以收下三张，只是一份轻松的小互动，不替你预测什么</p>
   </div>
   <article class="daily-fortune__card" data-fortune-card hidden>
     <span data-fortune-kind></span>
     <p data-fortune-text aria-live="polite"></p>
   </article>
   <div class="daily-fortune__actions">
-    <button class="button button--primary" type="button" data-fortune-draw>
-      抽一张今天的签
+    <button class="button button--primary" type="button" data-fortune-draw disabled>
+      正在确认今天的次数…
     </button>
     <button class="text-link" type="button" data-fortune-change hidden>
       换一句随缘的话
     </button>
   </div>
+  <p class="daily-fortune__status" data-fortune-status aria-live="polite">
+    登录游客身份后，次数会由云端按北京时间记录
+  </p>
 </section>
 
 <script>
+  import {
+    drawDailyFortune,
+    getDailyFortuneState,
+  } from '@/lib/site-interactions';
+  import { entryRandom, pickRandom } from '@/lib/random';
+  import type { DailyDrawState } from '@/types/site-interactions';
+
   interface Fortune {
     type: string;
     text: string;
@@ -39,60 +53,115 @@ import { dailyFortunes } from '@/data/interactions';
   const card = root?.querySelector<HTMLElement>('[data-fortune-card]');
   const kind = root?.querySelector<HTMLElement>('[data-fortune-kind]');
   const text = root?.querySelector<HTMLElement>('[data-fortune-text]');
+  const status = root?.querySelector<HTMLElement>('[data-fortune-status]');
   const fortunes = JSON.parse(root?.dataset.fortunes || '[]') as Fortune[];
-  const day = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-  }).format(new Date());
-  const storageKey = `hdp-daily-fortune:${day}`;
-  let currentIndex = -1;
+  const exchanges = JSON.parse(root?.dataset.exchanges || '[]') as string[];
+  const interactionRandom = entryRandom('fortune-exchange');
+  let lastExchangeIndex = -1;
+  let busy = false;
+  let currentState: DailyDrawState | null = null;
 
-  const remember = (index: number) => {
+  const setStatus = (message: string, error = false) => {
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle('is-error', error);
+  };
+
+  const fortuneAt = (index: number) =>
+    fortunes.length > 0 ? fortunes[index % fortunes.length] : undefined;
+
+  const cacheState = (state: DailyDrawState) => {
     try {
-      localStorage.setItem(storageKey, String(index));
+      localStorage.setItem(
+        `hdp-daily-fortune-cache:${state.date}`,
+        JSON.stringify(state),
+      );
     } catch {
-      // The interaction also works when storage is unavailable.
+      // 缓存不可用时，云端次数仍然有效。
     }
   };
 
-  const show = (index: number) => {
-    const fortune = fortunes[index];
-    if (!fortune || !card || !kind || !text || !draw || !change) return;
-    currentIndex = index;
+  const showCard = (index: number) => {
+    const fortune = fortuneAt(index);
+    if (!fortune || !card || !kind || !text || !change) return;
     card.classList.remove('is-visible');
-    window.requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
       kind.textContent = fortune.type;
       text.textContent = fortune.text;
       card.hidden = false;
-      draw.textContent = '今天的签';
-      draw.disabled = true;
       change.hidden = false;
-      window.requestAnimationFrame(() => card.classList.add('is-visible'));
+      requestAnimationFrame(() => card.classList.add('is-visible'));
     });
   };
 
-  const randomIndex = () => {
-    if (fortunes.length <= 1) return 0;
-    let next = Math.floor(Math.random() * fortunes.length);
-    if (next === currentIndex) next = (next + 1) % fortunes.length;
-    return next;
+  const renderState = (state: DailyDrawState, showLatest = true) => {
+    currentState = state;
+    cacheState(state);
+    if (showLatest && state.cards.length > 0) {
+      showCard(state.cards[state.cards.length - 1].index);
+    }
+    if (draw) {
+      draw.disabled = busy || state.reachedLimit;
+      draw.textContent = state.reachedLimit
+        ? '今天的三张签已经收好'
+        : `再抽一张 · 还剩 ${state.remainingCount} 次`;
+    }
+    setStatus(
+      state.reachedLimit
+        ? '今天的三张签已经收好，明天再来看看'
+        : `今天已抽 ${state.todayCount}/${state.limit} 张，按北京时间自动重置`,
+    );
   };
 
-  draw?.addEventListener('click', () => {
-    if (fortunes.length === 0) return;
-    let saved = -1;
-    try {
-      const value = Number(localStorage.getItem(storageKey));
-      if (Number.isInteger(value) && value >= 0 && value < fortunes.length) saved = value;
-    } catch {
-      // Use a fresh local result when storage is unavailable.
+  const initialize = async () => {
+    const result = await getDailyFortuneState();
+    if (result.ok) {
+      renderState(result.data);
+      return;
     }
-    const index = saved >= 0 ? saved : randomIndex();
-    remember(index);
-    show(index);
+    if (draw) {
+      draw.disabled = true;
+      draw.textContent =
+        result.code === 'signed-out' ? '请先以游客身份进入' : '今天暂时抽不了签';
+    }
+    setStatus(result.message, true);
+  };
+
+  draw?.addEventListener('click', async () => {
+    if (busy || currentState?.reachedLimit) return;
+    busy = true;
+    draw.disabled = true;
+    draw.textContent = '正在翻开一张签…';
+    const result = await drawDailyFortune();
+    busy = false;
+    if (result.ok) {
+      renderState(result.data, false);
+      if (result.data.card) showCard(result.data.card.index);
+      return;
+    }
+    if (result.data) renderState(result.data);
+    else if (draw) draw.disabled = false;
+    setStatus(result.message, true);
   });
 
   change?.addEventListener('click', () => {
-    if (fortunes.length === 0) return;
-    show(randomIndex());
+    if (!card || !kind || !text || exchanges.length === 0) return;
+    const picked = pickRandom(exchanges, interactionRandom, lastExchangeIndex);
+    lastExchangeIndex = picked.index;
+    card.classList.remove('is-visible');
+    requestAnimationFrame(() => {
+      kind.textContent = '随缘一句';
+      text.textContent = picked.value || '';
+      requestAnimationFrame(() => card.classList.add('is-visible'));
+    });
   });
+
+  const handleAuthChange = () => void initialize();
+  const cleanup = () => {
+    window.removeEventListener('hdp:auth-changed', handleAuthChange);
+  };
+  window.addEventListener('hdp:auth-changed', handleAuthChange);
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+  window.addEventListener('pagehide', cleanup, { once: true });
+  void initialize();
 </script>

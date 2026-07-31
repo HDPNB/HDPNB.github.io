@@ -28,7 +28,7 @@ export interface AmbientEffectConfig {
 export const ambientEffects: Record<AmbientVariant, AmbientEffectConfig> = {
   sakura: {
     variant: 'sakura',
-    counts: { high: 54, normal: 42, low: 28, mobile: 20 },
+    counts: { high: 48, normal: 40, low: 28, mobile: 20 },
     speed: 1,
     maxFps: 40,
     opacity: 0.78,
@@ -38,7 +38,7 @@ export const ambientEffects: Record<AmbientVariant, AmbientEffectConfig> = {
   },
   life: {
     variant: 'life',
-    counts: { high: 28, normal: 22, low: 14, mobile: 11 },
+    counts: { high: 38, normal: 30, low: 18, mobile: 15 },
     speed: 0.58,
     maxFps: 32,
     opacity: 0.48,
@@ -52,7 +52,7 @@ export const ambientEffects: Record<AmbientVariant, AmbientEffectConfig> = {
     speed: 0.38,
     maxFps: 30,
     opacity: 0.28,
-    labels: ['{ }', '</>', '01', 'C++', 'ESP32', '→', '()'],
+    labels: ['{}', '[]', '</ >', '01', 'C++', 'Python', 'ESP32', 'GPIO', 'UART', 'while', 'return', 'nullptr'],
     lightColors: ['#688176', '#7f9197', '#9b8d7d'],
     darkColors: ['#a9bdae', '#9fb4bd', '#c4b29f'],
   },

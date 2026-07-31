@@ -54,7 +54,7 @@ export const guestbookConfig = {
   title: '欢迎留下你想留下的话',
   description: '可以是一句问候、一段故事，也可以只是告诉我，你曾经路过这里。',
   composerTitle: '说点什么',
-  composerNotice: '留言会先在这里安静地等一会儿。审核通过后，它才会和其他人的话一起出现。',
+  composerNotice: '留言会先在这里安静地等一会儿。确认适合公开后，它才会和其他人的话一起出现。',
   placeholder: '写下一句问候、一段故事，或者今天忽然想说的话。',
 } as const;
 
@@ -65,9 +65,9 @@ export const galleryConfig = {
     '一张照片、一点颜色、一个当时没有注意到的角落，也可能替某一天保留下最准确的记忆。',
   ],
   uploadTitle: '留下一张照片',
-  uploadHint: '上传一张你愿意留在这里的照片。它不会立即公开，审核通过后才会出现在访客相册中。',
+  uploadHint: '上传一张你愿意留在这里的照片。照片确认公开后，才会出现在访客相册中。',
   privateHint: '选择“仅自己可见”后，照片只会在当前登录身份的个人区域中查询。清除浏览器数据或退出身份后，可能无法再次找到它。',
-  publicAccessHint: '公开相册只展示审核通过的照片。图片通过短时有效的临时链接加载，过期后重新刷新即可。',
+  publicAccessHint: '访客相册只展示已经公开的照片。图片通过短时有效的临时链接加载，过期后重新刷新即可。',
   publicEmpty: '这里还没有访客留下的照片。',
   ownEmpty: '你还没有在这里留下照片。',
 } as const;

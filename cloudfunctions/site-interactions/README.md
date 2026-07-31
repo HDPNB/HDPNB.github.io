@@ -1,49 +1,30 @@
 # site-interactions
 
-只处理网站“今日共鸣”的 CloudBase 云函数。
+网站互动角落的 CloudBase 云函数，运行环境为 Node.js 18。
 
-支持：
+支持今日共鸣、每日抽签、今日记忆卡、星空墙、漂流瓶和个人时光胶囊。
+所有写入、个人读取和每日限次都只使用
+`cloudbase.getCloudbaseContext(context).TCB_UUID` 中的真实身份，不接受
+客户端 UID。`getPublicStars` 是唯一可以不登录调用的 action。
 
-- `getReactions`
-- `react`
+核心集合：
 
-所有调用都必须携带现有 CloudBase 登录身份。函数只从
-`cloudbase.getCloudbaseContext(context).TCB_UUID` 读取真实 UID，不接受客户端传入 UID。
+- `site_reactions`
+- `daily_interactions`
+- `visitor_stars`
+- `drift_bottles`
+- `drift_bottle_responses`
+- `time_capsules`
+- `interaction_limits`
 
-## 集合
+这些集合应设置为仅管理员/仅服务端访问，浏览器不直接读写。完整权限、
+索引、部署和验收步骤见 `docs/cloudbase-interaction-corner.md`。
 
-创建仅服务端可访问的 `site_reactions`：
+每日抽签与记忆卡按北京时间日期计算，每项每天最多三次。写入在数据库
+事务中完成；每次抽取还带有随机请求 ID，同一请求被重试时会返回原结果，
+不会再次扣次数。
 
-```ts
-{
-  uid: string;
-  page: 'home' | 'life' | 'learn' | 'projects' | 'about' | 'guestbook' | 'gallery';
-  date: string;
-  reaction: 'healing' | 'curious' | 'cheer' | 'miss';
-  createdAt: Date;
-  updatedAt: Date;
-  lastReactedAt: Date;
-}
-```
-
-文档 ID 是 `UID + 页面 + 日期` 的 SHA-256，不向前端返回。
-
-## 调用权限
-
-```json
-{
-  "site-interactions": {
-    "invoke": "auth != null"
-  }
-}
-```
-
-## 推荐索引
-
-用于每日聚合：
-
-```text
-page 升序 + date 升序 + reaction 升序
-```
-
-集合应设置为仅管理员或仅服务端访问。前端不直接读取或写入该集合。
+漂流瓶也由服务端事务分配：只选择 `approved` 内容，排除创建者、当天已经
+看过的瓶子和最近看过的瓶子，并优先选择阅读次数较少、较久没有出现的
+记录。每次阅读后冷却 6 小时；累计 40 次或创建满 180 天后进入
+`archived`。旧记录缺少流转字段时按 0 次阅读、立即可用处理。

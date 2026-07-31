@@ -1,0 +1,284 @@
+---
+import { driftBottleCopies } from '@/data/copywriting';
+
+const categories = [
+  ['mood', '今天的心情'],
+  ['unsaid', '想说但没说的话'],
+  ['blessing', '给陌生人的祝福'],
+  ['worry', '小小烦恼'],
+  ['good-news', '最近的好消息'],
+] as const;
+const responses = [
+  ['hug', '抱抱'],
+  ['received', '收到'],
+  ['cheer', '加油'],
+  ['happy-for-you', '为你开心'],
+  ['wish', '愿你顺利'],
+] as const;
+---
+
+<section
+  class="drift-bottle"
+  data-drift-bottle
+  data-copy={JSON.stringify(driftBottleCopies)}
+  aria-labelledby="drift-bottle-title"
+>
+  <header class="interaction-page-heading">
+    <span class="eyebrow">A BOTTLE ON THE WATER</span>
+    <h1 id="drift-bottle-title">漂流瓶</h1>
+    <p>
+      <span>纸条会先进入等待区，确认适合公开后才开始漂流</span>
+      <span>捞取时不会遇到自己的瓶子，也不会展示任何身份信息</span>
+    </p>
+  </header>
+
+  <div class="drift-bottle__water" data-bottle-water>
+    <span class="drift-bottle__waves" aria-hidden="true"></span>
+    <button class="drift-bottle__object" type="button" data-bottle-draw aria-label="捞一只漂流瓶">
+      <span aria-hidden="true">⌁</span>
+      <strong>捞一只漂流瓶</strong>
+      <small>每天最多三只</small>
+    </button>
+    <article class="drift-bottle__paper" data-bottle-paper hidden>
+      <span data-bottle-category></span>
+      <p data-bottle-content></p>
+      <time data-bottle-date></time>
+      <div class="drift-bottle__responses" data-bottle-responses>
+        {responses.map(([value, label]) => (
+          <button type="button" data-response={value}>{label}</button>
+        ))}
+      </div>
+    </article>
+    <p class="interaction-status" data-bottle-draw-status aria-live="polite">
+      水面很安静，点击瓶子以后再看看
+    </p>
+  </div>
+
+  <div class="drift-bottle__panels">
+    <form class="interaction-form" data-bottle-form>
+      <div>
+        <span class="eyebrow">SEND A NOTE</span>
+        <h2>投下一张纸条</h2>
+        <p>每天最多投递一只，确认适合公开后才会进入漂流池</p>
+      </div>
+      <label class="interaction-field">
+        <span>纸条内容</span>
+        <textarea name="content" rows="4" minlength="1" maxlength="80" required data-bottle-input></textarea>
+        <small><span data-bottle-count>0</span>/80</small>
+      </label>
+      <label class="interaction-field">
+        <span>分类</span>
+        <select name="category">
+          {categories.map(([value, label]) => <option value={value}>{label}</option>)}
+        </select>
+      </label>
+      <button class="button button--primary" type="submit" data-bottle-submit>放入漂流池</button>
+      <p class="interaction-status" data-bottle-form-status aria-live="polite">
+        请先通过顶部的游客入口进入
+      </p>
+    </form>
+    <section class="interaction-own-list">
+      <div>
+        <span class="eyebrow">MY BOTTLES</span>
+        <h2>我的投递</h2>
+      </div>
+      <div data-my-bottles><p class="interaction-empty">登录后可以查看自己的公开状态</p></div>
+    </section>
+  </div>
+</section>
+
+<script>
+  import {
+    createDriftBottle,
+    drawDriftBottle,
+    getMyDriftBottles,
+    respondToDriftBottle,
+  } from '@/lib/site-interactions';
+  import { entryRandom, pickRandom } from '@/lib/random';
+  import type {
+    BottleCategory,
+    BottleResponse,
+    DrawnBottle,
+    OwnBottle,
+  } from '@/types/site-interactions';
+
+  const root = document.querySelector<HTMLElement>('[data-drift-bottle]');
+  const water = root?.querySelector<HTMLElement>('[data-bottle-water]');
+  const draw = root?.querySelector<HTMLButtonElement>('[data-bottle-draw]');
+  const drawLabel = draw?.querySelector<HTMLElement>('strong');
+  const paper = root?.querySelector<HTMLElement>('[data-bottle-paper]');
+  const drawStatus = root?.querySelector<HTMLElement>('[data-bottle-draw-status]');
+  const form = root?.querySelector<HTMLFormElement>('[data-bottle-form]');
+  const input = root?.querySelector<HTMLTextAreaElement>('[data-bottle-input]');
+  const count = root?.querySelector<HTMLElement>('[data-bottle-count]');
+  const submit = root?.querySelector<HTMLButtonElement>('[data-bottle-submit]');
+  const formStatus = root?.querySelector<HTMLElement>('[data-bottle-form-status]');
+  const myBottles = root?.querySelector<HTMLElement>('[data-my-bottles]');
+  const copy = JSON.parse(root?.dataset.copy || '{}') as Record<string, string[]>;
+  const random = entryRandom('drift-bottle-copy');
+  const categoryLabels: Record<BottleCategory, string> = {
+    mood: '今天的心情',
+    unsaid: '想说但没说的话',
+    blessing: '给陌生人的祝福',
+    worry: '小小烦恼',
+    'good-news': '最近的好消息',
+  };
+  const statusLabels: Record<OwnBottle['status'], string> = {
+    pending: '等待公开',
+    approved: '已经公开',
+    rejected: '暂未公开',
+    hidden: '已隐藏',
+    archived: '已归档',
+  };
+  let activeBottle: DrawnBottle | null = null;
+  let drawBusy = false;
+  let submitBusy = false;
+  let destroyed = false;
+  let revealTimer = 0;
+
+  const message = (pool: string, fallback: string) =>
+    pickRandom(copy[pool] || [], random).value || fallback;
+
+  const showBottle = (bottle: DrawnBottle) => {
+    if (!paper) return;
+    const category = paper.querySelector<HTMLElement>('[data-bottle-category]');
+    const content = paper.querySelector<HTMLElement>('[data-bottle-content]');
+    const date = paper.querySelector<HTMLTimeElement>('[data-bottle-date]');
+    if (category) category.textContent = categoryLabels[bottle.category];
+    if (content) content.textContent = bottle.content;
+    if (date) {
+      date.dateTime = bottle.createdAt;
+      date.textContent = new Date(bottle.createdAt).toLocaleDateString('zh-CN');
+    }
+    paper.hidden = false;
+    paper.classList.remove('is-open');
+    requestAnimationFrame(() => paper.classList.add('is-open'));
+  };
+
+  draw?.addEventListener('click', async () => {
+    if (drawBusy || !draw) return;
+    drawBusy = true;
+    draw.disabled = true;
+    water?.classList.remove('is-catching');
+    if (paper) {
+      paper.classList.remove('is-open');
+      paper.hidden = true;
+    }
+    if (drawStatus) drawStatus.textContent = '正在看看哪只瓶子靠岸…';
+    const result = await drawDriftBottle();
+    if (!result.ok) {
+      drawBusy = false;
+      draw.disabled = false;
+      if (drawLabel) drawLabel.textContent = '再看看远处';
+      if (drawStatus) drawStatus.textContent = result.message;
+      return;
+    }
+    activeBottle = result.data.bottle;
+    water?.classList.add('is-catching');
+    if (drawStatus) {
+      drawStatus.textContent = `${message('draw', '一只瓶子正从远处慢慢靠岸')} · 今天还剩 ${result.data.remainingCount} 次`;
+    }
+    revealTimer = window.setTimeout(() => {
+      water?.classList.remove('is-catching');
+      if (activeBottle) showBottle(activeBottle);
+      if (drawLabel) drawLabel.textContent = '再看看远处';
+      if (drawStatus) {
+        drawStatus.textContent = `读完后，它会在稍后继续漂流 · 今天还剩 ${result.data.remainingCount} 次`;
+      }
+      drawBusy = false;
+      draw.disabled = false;
+    }, 720);
+  });
+
+  root?.querySelectorAll<HTMLButtonElement>('[data-response]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!activeBottle || button.disabled) return;
+      const response = button.dataset.response as BottleResponse;
+      root.querySelectorAll<HTMLButtonElement>('[data-response]').forEach((item) => {
+        item.disabled = true;
+      });
+      const result = await respondToDriftBottle(activeBottle.bottleToken, response);
+      root.querySelectorAll<HTMLButtonElement>('[data-response]').forEach((item) => {
+        item.disabled = false;
+      });
+      if (drawStatus) {
+        drawStatus.textContent = result.ok
+          ? message('response', '固定回应已经送到')
+          : result.message;
+      }
+    });
+  });
+
+  input?.addEventListener('input', () => {
+    if (count) count.textContent = String(input.value.length);
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitBusy || !submit || !input) return;
+    const data = new FormData(form);
+    submitBusy = true;
+    submit.disabled = true;
+    submit.textContent = '正在投递…';
+    const result = await createDriftBottle({
+      content: input.value,
+      category: String(data.get('category')) as BottleCategory,
+    });
+    submitBusy = false;
+    submit.disabled = false;
+    submit.textContent = '放入漂流池';
+    if (!result.ok) {
+      if (formStatus) formStatus.textContent = result.message;
+      return;
+    }
+    input.value = '';
+    if (count) count.textContent = '0';
+    if (formStatus) formStatus.textContent = message('create', '纸条已经折好，正在等待公开');
+    await loadMine();
+  });
+
+  const renderMine = (bottles: OwnBottle[]) => {
+    if (!myBottles) return;
+    myBottles.replaceChildren();
+    if (bottles.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'interaction-empty';
+      empty.textContent = '你还没有投递过漂流瓶';
+      myBottles.append(empty);
+      return;
+    }
+    bottles.forEach((bottle) => {
+      const article = document.createElement('article');
+      const content = document.createElement('p');
+      const meta = document.createElement('small');
+      content.textContent = bottle.content;
+      meta.textContent = `${categoryLabels[bottle.category]} · ${statusLabels[bottle.status]} · ${new Date(bottle.createdAt).toLocaleDateString('zh-CN')}`;
+      article.append(content, meta);
+      myBottles.append(article);
+    });
+  };
+
+  const loadMine = async () => {
+    if (destroyed) return;
+    const result = await getMyDriftBottles();
+    if (!result.ok) {
+      if (myBottles) {
+        myBottles.textContent = result.code === 'signed-out'
+          ? '登录后可以查看自己的公开状态'
+          : result.message;
+      }
+      return;
+    }
+    renderMine(Array.isArray(result.data.bottles) ? result.data.bottles : []);
+  };
+
+  const cleanup = () => {
+    destroyed = true;
+    clearTimeout(revealTimer);
+    window.removeEventListener('hdp:auth-changed', loadMine);
+  };
+  window.addEventListener('hdp:auth-changed', loadMine);
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+  window.addEventListener('pagehide', cleanup, { once: true });
+  void loadMine();
+</script>

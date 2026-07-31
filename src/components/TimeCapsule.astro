@@ -1,0 +1,262 @@
+---
+import { timeCapsuleCopies } from '@/data/copywriting';
+---
+
+<section
+  class="time-capsule"
+  data-time-capsule
+  data-copy={JSON.stringify(timeCapsuleCopies)}
+  aria-labelledby="time-capsule-title"
+>
+  <header class="interaction-page-heading">
+    <span class="eyebrow">A NOTE FOR LATER</span>
+    <h1 id="time-capsule-title">时光胶囊</h1>
+    <p>正文默认只属于创建它的游客身份，到达服务端判断的解锁时间后才会返回</p>
+  </header>
+  <aside class="time-capsule__notice">
+    清除浏览器数据、退出身份或更换设备后，匿名身份可能无法找回，也可能因此失去这些胶囊
+  </aside>
+  <div class="time-capsule__layout">
+    <form class="interaction-form" data-capsule-form>
+      <div>
+        <span class="eyebrow">CREATE A CAPSULE</span>
+        <h2>写给以后</h2>
+        <p>最多保留十枚未删除胶囊</p>
+      </div>
+      <label class="interaction-field">
+        <span>标题</span>
+        <input name="title" minlength="1" maxlength="30" required data-capsule-title />
+        <small><span data-capsule-title-count>0</span>/30</small>
+      </label>
+      <label class="interaction-field">
+        <span>正文</span>
+        <textarea name="content" rows="5" minlength="1" maxlength="200" required data-capsule-content></textarea>
+        <small><span data-capsule-content-count>0</span>/200</small>
+      </label>
+      <fieldset class="time-capsule__choices">
+        <legend>什么时候打开</legend>
+        <label><input type="radio" name="delay" value="1" checked /> 明天</label>
+        <label><input type="radio" name="delay" value="7" /> 7 天后</label>
+        <label><input type="radio" name="delay" value="30" /> 30 天后</label>
+        <label><input type="radio" name="delay" value="custom" /> 自定义</label>
+      </fieldset>
+      <label class="interaction-field" data-capsule-custom hidden>
+        <span>自定义解锁时间</span>
+        <input type="datetime-local" name="customUnlock" data-capsule-custom-input />
+      </label>
+      <button class="button button--primary" type="submit" data-capsule-submit>合上这枚胶囊</button>
+      <p class="interaction-status" data-capsule-form-status aria-live="polite">
+        请先通过顶部的游客入口进入
+      </p>
+    </form>
+    <section class="time-capsule__list">
+      <div>
+        <span class="eyebrow">MY CAPSULES</span>
+        <h2>我的胶囊</h2>
+        <p data-capsule-quota>登录后可以查看自己的胶囊</p>
+      </div>
+      <div data-capsule-list><p class="interaction-empty">这里暂时还没有胶囊</p></div>
+    </section>
+  </div>
+  <dialog class="time-capsule__dialog" data-capsule-dialog>
+    <article>
+      <button type="button" data-capsule-dialog-close aria-label="关闭胶囊内容">×</button>
+      <span>TIME CAPSULE</span>
+      <h2 data-opened-title></h2>
+      <p data-opened-content></p>
+    </article>
+  </dialog>
+</section>
+
+<script>
+  import {
+    createTimeCapsule,
+    deleteTimeCapsule,
+    getMyTimeCapsules,
+    openTimeCapsule,
+  } from '@/lib/site-interactions';
+  import { entryRandom, pickRandom } from '@/lib/random';
+  import type { CapsuleSummary } from '@/types/site-interactions';
+
+  const root = document.querySelector<HTMLElement>('[data-time-capsule]');
+  const form = root?.querySelector<HTMLFormElement>('[data-capsule-form]');
+  const titleInput = root?.querySelector<HTMLInputElement>('[data-capsule-title]');
+  const contentInput = root?.querySelector<HTMLTextAreaElement>('[data-capsule-content]');
+  const titleCount = root?.querySelector<HTMLElement>('[data-capsule-title-count]');
+  const contentCount = root?.querySelector<HTMLElement>('[data-capsule-content-count]');
+  const customWrap = root?.querySelector<HTMLElement>('[data-capsule-custom]');
+  const customInput = root?.querySelector<HTMLInputElement>('[data-capsule-custom-input]');
+  const submit = root?.querySelector<HTMLButtonElement>('[data-capsule-submit]');
+  const formStatus = root?.querySelector<HTMLElement>('[data-capsule-form-status]');
+  const list = root?.querySelector<HTMLElement>('[data-capsule-list]');
+  const quota = root?.querySelector<HTMLElement>('[data-capsule-quota]');
+  const dialog = root?.querySelector<HTMLDialogElement>('[data-capsule-dialog]');
+  const copy = JSON.parse(root?.dataset.copy || '{}') as Record<string, string[]>;
+  const random = entryRandom('time-capsule-copy');
+  let busy = false;
+  let destroyed = false;
+  let countdownTimer = 0;
+  let deleteConfirmToken = '';
+  let deleteConfirmTimer = 0;
+
+  const message = (pool: string, fallback: string) =>
+    pickRandom(copy[pool] || [], random).value || fallback;
+
+  const formatRemaining = (milliseconds: number) => {
+    if (milliseconds <= 0) return '已经可以打开';
+    const days = Math.floor(milliseconds / 86_400_000);
+    const hours = Math.floor((milliseconds % 86_400_000) / 3_600_000);
+    if (days > 0) return `还要 ${days} 天 ${hours} 小时`;
+    const minutes = Math.max(1, Math.ceil(milliseconds / 60_000));
+    return `还要 ${minutes} 分钟`;
+  };
+
+  const renderCapsules = (capsules: CapsuleSummary[]) => {
+    if (!list) return;
+    list.replaceChildren();
+    if (capsules.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'interaction-empty';
+      empty.textContent = '你还没有把话交给未来';
+      list.append(empty);
+      return;
+    }
+    capsules.forEach((capsule) => {
+      const article = document.createElement('article');
+      const heading = document.createElement('h3');
+      const dates = document.createElement('p');
+      const remaining = document.createElement('strong');
+      const actions = document.createElement('div');
+      const open = document.createElement('button');
+      const remove = document.createElement('button');
+      heading.textContent = capsule.title;
+      dates.textContent = `创建于 ${new Date(capsule.createdAt).toLocaleDateString('zh-CN')} · 解锁于 ${new Date(capsule.unlockAt).toLocaleString('zh-CN')}`;
+      remaining.textContent = formatRemaining(new Date(capsule.unlockAt).getTime() - Date.now());
+      remaining.dataset.unlockAt = capsule.unlockAt;
+      open.type = 'button';
+      open.textContent = capsule.unlocked ? '打开胶囊' : '还不能打开';
+      open.disabled = !capsule.unlocked;
+      open.addEventListener('click', async () => {
+        open.disabled = true;
+        const result = await openTimeCapsule(capsule.capsuleToken);
+        open.disabled = false;
+        if (!result.ok) {
+          if (formStatus) formStatus.textContent = result.message;
+          return;
+        }
+        const openedTitle = dialog?.querySelector<HTMLElement>('[data-opened-title]');
+        const openedContent = dialog?.querySelector<HTMLElement>('[data-opened-content]');
+        if (openedTitle) openedTitle.textContent = result.data.capsule.title;
+        if (openedContent) openedContent.textContent = result.data.capsule.content;
+        dialog?.showModal();
+      });
+      remove.type = 'button';
+      remove.textContent = '删除';
+      remove.addEventListener('click', async () => {
+        if (deleteConfirmToken !== capsule.capsuleToken) {
+          deleteConfirmToken = capsule.capsuleToken;
+          remove.textContent = '再点一次确认删除';
+          clearTimeout(deleteConfirmTimer);
+          deleteConfirmTimer = window.setTimeout(() => {
+            deleteConfirmToken = '';
+            remove.textContent = '删除';
+          }, 5000);
+          return;
+        }
+        remove.disabled = true;
+        const result = await deleteTimeCapsule(capsule.capsuleToken);
+        if (!result.ok) {
+          remove.disabled = false;
+          if (formStatus) formStatus.textContent = result.message;
+          return;
+        }
+        await loadCapsules();
+      });
+      actions.append(open, remove);
+      article.append(heading, dates, remaining, actions);
+      list.append(article);
+    });
+  };
+
+  const loadCapsules = async () => {
+    if (destroyed) return;
+    const result = await getMyTimeCapsules();
+    if (!result.ok) {
+      if (quota) {
+        quota.textContent = result.code === 'signed-out'
+          ? '登录后可以查看自己的胶囊'
+          : result.message;
+      }
+      return;
+    }
+    if (quota) quota.textContent = `已保留 ${result.data.activeCount}/${result.data.limit} 枚`;
+    renderCapsules(Array.isArray(result.data.capsules) ? result.data.capsules : []);
+  };
+
+  titleInput?.addEventListener('input', () => {
+    if (titleCount) titleCount.textContent = String(titleInput.value.length);
+  });
+  contentInput?.addEventListener('input', () => {
+    if (contentCount) contentCount.textContent = String(contentInput.value.length);
+  });
+  form?.addEventListener('change', () => {
+    const data = new FormData(form);
+    if (customWrap) customWrap.hidden = data.get('delay') !== 'custom';
+  });
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (busy || !submit || !titleInput || !contentInput) return;
+    const data = new FormData(form);
+    const delay = String(data.get('delay'));
+    const unlockAt = delay === 'custom'
+      ? new Date(customInput?.value || '')
+      : new Date(Date.now() + Number(delay) * 86_400_000);
+    if (Number.isNaN(unlockAt.getTime()) || unlockAt.getTime() <= Date.now()) {
+      if (formStatus) formStatus.textContent = '请选择晚于现在的解锁时间';
+      return;
+    }
+    busy = true;
+    submit.disabled = true;
+    submit.textContent = '正在合上…';
+    const result = await createTimeCapsule({
+      title: titleInput.value,
+      content: contentInput.value,
+      unlockAt: unlockAt.toISOString(),
+    });
+    busy = false;
+    submit.disabled = false;
+    submit.textContent = '合上这枚胶囊';
+    if (!result.ok) {
+      if (formStatus) formStatus.textContent = result.message;
+      return;
+    }
+    form.reset();
+    if (titleCount) titleCount.textContent = '0';
+    if (contentCount) contentCount.textContent = '0';
+    if (customWrap) customWrap.hidden = true;
+    if (formStatus) formStatus.textContent = message('create', '胶囊已经合上，到时间后再回来看看');
+    await loadCapsules();
+  });
+
+  const closeDialog = () => dialog?.close();
+  dialog?.querySelector('[data-capsule-dialog-close]')?.addEventListener('click', closeDialog);
+  dialog?.addEventListener('click', (event) => {
+    if (event.target === dialog) closeDialog();
+  });
+  const updateCountdowns = () => {
+    list?.querySelectorAll<HTMLElement>('[data-unlock-at]').forEach((item) => {
+      item.textContent = formatRemaining(new Date(item.dataset.unlockAt || '').getTime() - Date.now());
+    });
+  };
+  countdownTimer = window.setInterval(updateCountdowns, 60_000);
+  const cleanup = () => {
+    destroyed = true;
+    clearInterval(countdownTimer);
+    clearTimeout(deleteConfirmTimer);
+    window.removeEventListener('hdp:auth-changed', loadCapsules);
+  };
+  window.addEventListener('hdp:auth-changed', loadCapsules);
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+  window.addEventListener('pagehide', cleanup, { once: true });
+  void loadCapsules();
+</script>

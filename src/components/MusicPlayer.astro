@@ -1,15 +1,18 @@
 ---
 import { musicTracks } from '@/data/music';
+import { musicEmptyCopies } from '@/data/copywriting';
 
 const hasTracks = musicTracks.length > 0;
+const hasPlayableTracks = musicTracks.some((track) => Boolean(track.src));
 const firstTrack = musicTracks[0];
-const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
+const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))];
 ---
 
 <section
   class:list={['music-player', { 'music-player--empty': !hasTracks }]}
   data-music-player
   data-tracks={JSON.stringify(musicTracks)}
+  data-empty-copies={JSON.stringify(musicEmptyCopies)}
   aria-label="全局音乐播放器"
 >
   <audio preload="metadata" data-music-audio></audio>
@@ -29,8 +32,8 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     <div class="music-player__content">
       <div class="music-player__heading">
         <div class="music-player__text">
-          <strong data-music-title>{firstTrack?.title || '还没有放进音乐'}</strong>
-          <span data-music-artist>{firstTrack?.artist || '把有权公开播放的音频放到 public/audio/'}</span>
+          <strong data-music-title>{firstTrack?.title || '这里还没有放歌'}</strong>
+          <span data-music-artist>{firstTrack?.artist || '等我挑几首再回来'}</span>
         </div>
         <button
           class="music-icon-button music-list-toggle"
@@ -42,11 +45,11 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
       </div>
 
       <div class="music-player__controls">
-        <button class="music-icon-button" type="button" aria-label="上一首" data-music-prev disabled={!hasTracks}>‹</button>
-        <button class="music-play-button" type="button" aria-label="播放" data-music-play disabled={!hasTracks}>
+        <button class="music-icon-button" type="button" aria-label="上一首" data-music-prev disabled={!hasPlayableTracks}>‹</button>
+        <button class="music-play-button" type="button" aria-label="播放" data-music-play disabled={!firstTrack?.src}>
           <span data-play-icon aria-hidden="true">▶</span>
         </button>
-        <button class="music-icon-button" type="button" aria-label="下一首" data-music-next disabled={!hasTracks}>›</button>
+        <button class="music-icon-button" type="button" aria-label="下一首" data-music-next disabled={!hasPlayableTracks}>›</button>
         <div class="music-player__timeline">
           <input
             type="range"
@@ -56,11 +59,11 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
             value="0"
             aria-label="播放进度"
             data-music-progress
-            disabled={!hasTracks}
+            disabled={!firstTrack?.src}
           />
           <div><span data-music-current>0:00</span><span data-music-duration>0:00</span></div>
         </div>
-        <button class="music-icon-button" type="button" aria-label="静音" data-music-mute disabled={!hasTracks}>音</button>
+        <button class="music-icon-button" type="button" aria-label="静音" data-music-mute disabled={!firstTrack?.src}>音</button>
         <input
           class="music-player__volume"
           type="range"
@@ -70,11 +73,11 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
           value="0.7"
           aria-label="音量"
           data-music-volume
-          disabled={!hasTracks}
+          disabled={!firstTrack?.src}
         />
       </div>
       <p class="music-player__status" data-music-status aria-live="polite">
-        {hasTracks ? '点击播放，声音才会开始。' : '播放器已经准备好，添加音频后即可使用。'}
+        {hasTracks ? '点击播放，声音才会开始' : '播放列表暂时是空的'}
       </p>
     </div>
   </div>
@@ -119,28 +122,36 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     <ol data-music-list></ol>
     <p class="music-search-empty" data-music-empty hidden>暂时没有找到这首歌。</p>
     {!hasTracks && (
-      <p class="music-playlist__empty">在 <code>src/data/music.ts</code> 中添加歌曲配置后，这里会显示播放列表。</p>
+      <>
+        <p class="music-playlist__empty" data-music-empty-copy>这里先留给下一首歌</p>
+        {import.meta.env.DEV && (
+          <small class="music-playlist__dev">开发提示：在 src/data/music.ts 中添加歌曲配置</small>
+        )}
+      </>
     )}
 
     <a
       class="music-qq-link"
       href={firstTrack?.qqMusicUrl || '#'}
       target="_blank"
-      rel="noreferrer"
+      rel="noopener noreferrer"
       data-music-qq
       hidden={!firstTrack?.qqMusicUrl}
-    >前往QQ音乐收听</a>
+    >在 QQ 音乐打开</a>
   </div>
 </section>
 
 <script>
+  import { entryRandom, pickRandom } from '@/lib/random';
+
   type Track = {
     title: string;
-    artist: string;
-    cover: string;
-    src: string;
-    tags: string[];
+    artist?: string;
+    cover?: string;
+    src?: string;
+    tags?: string[];
     qqMusicUrl?: string;
+    lyric?: string;
   };
   type PlayMode = 'list' | 'single' | 'shuffle' | 'sequential';
   type ListScope = 'all' | 'recent' | 'favorites';
@@ -158,6 +169,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
   const player = document.querySelector<HTMLElement>('[data-music-player]');
   const audio = player?.querySelector<HTMLAudioElement>('[data-music-audio]');
   const tracks = JSON.parse(player?.dataset.tracks || '[]') as Track[];
+  const emptyCopies = JSON.parse(player?.dataset.emptyCopies || '[]') as string[];
 
   if (player && audio) {
     const title = player.querySelector<HTMLElement>('[data-music-title]');
@@ -182,7 +194,9 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     const surpriseButton = player.querySelector<HTMLButtonElement>('[data-music-surprise]');
     const qqLink = player.querySelector<HTMLAnchorElement>('[data-music-qq]');
     const status = player.querySelector<HTMLElement>('[data-music-status]');
+    const emptyCopy = player.querySelector<HTMLElement>('[data-music-empty-copy]');
     const storageKey = 'hdp-music-player';
+    const playerRandom = entryRandom('music-player');
     const modes: PlayMode[] = ['list', 'single', 'shuffle', 'sequential'];
     const modeLabels: Record<PlayMode, string> = {
       list: '列表循环',
@@ -200,15 +214,19 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     };
 
     const saved = readState();
-    const savedIndex = saved.src ? tracks.findIndex((track) => track.src === saved.src) : -1;
+    const trackKey = (track: Track) =>
+      track.src || track.qqMusicUrl || `${track.title}:${track.artist || ''}`;
+    const savedIndex = saved.src
+      ? tracks.findIndex((track) => trackKey(track) === saved.src || track.src === saved.src)
+      : -1;
     let index = savedIndex >= 0
       ? savedIndex
       : Math.min(Math.max(saved.index || 0, 0), Math.max(tracks.length - 1, 0));
     let pendingTime = Math.max(saved.progress || 0, 0);
     let lastVolume = typeof saved.volume === 'number' ? Math.min(Math.max(saved.volume, 0), 1) : 0.7;
     let playMode: PlayMode = saved.mode && modes.includes(saved.mode) ? saved.mode : 'list';
-    let recent = (saved.recent || []).filter((src) => tracks.some((track) => track.src === src)).slice(0, 10);
-    let favorites = new Set((saved.favorites || []).filter((src) => tracks.some((track) => track.src === src)));
+    let recent = (saved.recent || []).filter((key) => tracks.some((track) => trackKey(track) === key)).slice(0, 10);
+    let favorites = new Set((saved.favorites || []).filter((key) => tracks.some((track) => trackKey(track) === key)));
     let activeTag = '';
     let scope: ListScope = 'all';
     let lastProgressSave = 0;
@@ -225,7 +243,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
       const currentTrack = tracks[index];
       localStorage.setItem(storageKey, JSON.stringify({
         index,
-        src: currentTrack?.src,
+        src: currentTrack ? trackKey(currentTrack) : undefined,
         progress: pendingTime > 0 ? pendingTime : (Number.isFinite(audio.currentTime) ? audio.currentTime : 0),
         volume: audio.volume,
         expanded: !playlist?.hidden,
@@ -238,14 +256,14 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     const getVisibleIndices = () => {
       const query = normalize(searchInput?.value || '');
       const base = scope === 'recent'
-        ? recent.map((src) => tracks.findIndex((track) => track.src === src)).filter((trackIndex) => trackIndex >= 0)
+        ? recent.map((key) => tracks.findIndex((track) => trackKey(track) === key)).filter((trackIndex) => trackIndex >= 0)
         : tracks.map((_, trackIndex) => trackIndex);
 
       return base.filter((trackIndex) => {
         const track = tracks[trackIndex];
-        const matchesScope = scope !== 'favorites' || favorites.has(track.src);
-        const matchesTag = !activeTag || track.tags.includes(activeTag);
-        const matchesSearch = !query || normalize(`${track.title} ${track.artist}`).includes(query);
+        const matchesScope = scope !== 'favorites' || favorites.has(trackKey(track));
+        const matchesTag = !activeTag || (track.tags || []).includes(activeTag);
+        const matchesSearch = !query || normalize(`${track.title} ${track.artist || ''}`).includes(query);
         return matchesScope && matchesTag && matchesSearch;
       });
     };
@@ -283,26 +301,29 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
         select.type = 'button';
         select.className = 'music-track-button';
         select.dataset.trackIndex = String(trackIndex);
-        select.setAttribute('aria-label', `播放《${track.title}》—${track.artist}`);
+        select.setAttribute(
+          'aria-label',
+          `${track.src ? '播放' : '选择'}《${track.title}》—${track.artist || '未填写歌手'}`,
+        );
         if (trackIndex === index) select.setAttribute('aria-current', 'true');
 
         const text = document.createElement('span');
         const name = document.createElement('strong');
         const byline = document.createElement('small');
         name.textContent = track.title;
-        byline.textContent = track.artist;
+        byline.textContent = track.artist || '未填写歌手';
         text.append(name, byline);
 
         const tags = document.createElement('small');
         tags.className = 'music-track-tags';
-        tags.textContent = track.tags.slice(0, 2).join(' · ');
+        tags.textContent = (track.tags || []).slice(0, 2).join(' · ');
         select.append(text, tags);
 
         const favorite = document.createElement('button');
         favorite.type = 'button';
         favorite.className = 'music-favorite-button';
         favorite.dataset.favoriteIndex = String(trackIndex);
-        const isFavorite = favorites.has(track.src);
+        const isFavorite = favorites.has(trackKey(track));
         favorite.textContent = isFavorite ? '♥' : '♡';
         favorite.classList.toggle('is-active', isFavorite);
         favorite.setAttribute('aria-pressed', String(isFavorite));
@@ -327,31 +348,55 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
       if (!tracks[nextIndex]) return;
       index = nextIndex;
       const track = tracks[index];
-      audio.src = track.src;
-      audio.load();
-      if (title) title.textContent = track.title;
-      if (artist) artist.textContent = track.artist;
-      if (cover) {
-        cover.src = track.cover;
-        cover.alt = `${track.title}封面`;
+      audio.pause();
+      if (track.src) {
+        audio.src = track.src;
+        audio.load();
+      } else {
+        audio.removeAttribute('src');
+        audio.load();
       }
+      if (title) title.textContent = track.title;
+      if (artist) artist.textContent = track.artist || '未填写歌手';
+      if (cover) {
+        cover.classList.remove('is-changing');
+        cover.src = track.cover || '/images/life/my_day.webp';
+        cover.alt = `${track.title}封面`;
+        requestAnimationFrame(() => cover.classList.add('is-changing'));
+      }
+      const playable = Boolean(track.src);
+      [playButton, progress, muteButton, volume].forEach((control) => {
+        if (control) control.disabled = !playable;
+      });
       if (qqLink) {
         qqLink.hidden = !track.qqMusicUrl;
         qqLink.href = track.qqMusicUrl || '#';
       }
       if (!keepSavedTime) pendingTime = 0;
-      if (status) status.textContent = `已选择《${track.title}》，点击播放后才会发出声音。`;
+      if (status) {
+        status.textContent = playable
+          ? `已选择《${track.title}》，点击播放后才会发出声音`
+          : track.qqMusicUrl
+            ? '这首歌需要在 QQ 音乐打开'
+            : '这首歌暂时没有可播放的本地音频';
+      }
       renderList();
       saveState();
     };
 
     const playAudio = async () => {
       if (tracks.length === 0) return;
+      if (!tracks[index]?.src) {
+        if (status) status.textContent = tracks[index]?.qqMusicUrl
+          ? '请使用“在 QQ 音乐打开”前往收听'
+          : '这首歌暂时没有可播放的本地音频';
+        return;
+      }
       try {
         await audio.play();
         if (status) status.textContent = `正在播放《${tracks[index].title}》`;
       } catch {
-        if (status) status.textContent = '暂时无法播放，请检查本地音频文件是否存在。';
+        if (status) status.textContent = '这首歌暂时没有加载成功，可以换一首试试';
       }
       updatePlayState();
     };
@@ -364,11 +409,11 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     const randomIndex = (pool: number[]) => {
       const alternatives = pool.filter((trackIndex) => trackIndex !== index);
       const candidates = alternatives.length > 0 ? alternatives : pool;
-      return candidates[Math.floor(Math.random() * candidates.length)];
+      return pickRandom(candidates, playerRandom).value ?? candidates[0];
     };
 
     const advance = async (fromEnded: boolean) => {
-      const pool = getVisibleIndices();
+      const pool = getVisibleIndices().filter((trackIndex) => Boolean(tracks[trackIndex].src));
       if (pool.length === 0) {
         audio.pause();
         if (status) status.textContent = '当前筛选里没有可以继续播放的歌曲。';
@@ -400,7 +445,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     };
 
     const previous = async () => {
-      const pool = getVisibleIndices();
+      const pool = getVisibleIndices().filter((trackIndex) => Boolean(tracks[trackIndex].src));
       if (pool.length === 0) return;
       if (playMode === 'shuffle') {
         await switchTrack(randomIndex(pool));
@@ -412,9 +457,10 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     };
 
     const recordRecent = () => {
-      const src = tracks[index]?.src;
-      if (!src) return;
-      recent = [src, ...recent.filter((item) => item !== src)].slice(0, 10);
+      const track = tracks[index];
+      if (!track?.src) return;
+      const key = trackKey(track);
+      recent = [key, ...recent.filter((item) => item !== key)].slice(0, 10);
       if (scope === 'recent') renderList();
       saveState();
     };
@@ -433,6 +479,12 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
     if (volume) volume.value = String(lastVolume);
     updateModeButton();
     renderList();
+    if (emptyCopy && emptyCopies.length > 0) {
+      emptyCopy.textContent = pickRandom(
+        emptyCopies,
+        entryRandom('music-empty'),
+      ).value || emptyCopies[0];
+    }
 
     if (tracks.length > 0) {
       updateTrack(index, true);
@@ -457,6 +509,11 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
       updatePlayState();
     });
     audio.addEventListener('pause', updatePlayState);
+    audio.addEventListener('error', () => {
+      audio.pause();
+      updatePlayState();
+      if (status) status.textContent = '这首歌暂时没有加载成功，可以换一首试试';
+    });
 
     audio.addEventListener('loadedmetadata', () => {
       if (pendingTime > 0 && pendingTime < audio.duration) {
@@ -523,7 +580,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
       if (status) status.textContent = `已切换为${modeLabels[playMode]}。`;
     });
     surpriseButton?.addEventListener('click', async () => {
-      const pool = getVisibleIndices();
+      const pool = getVisibleIndices().filter((trackIndex) => Boolean(tracks[trackIndex].src));
       if (pool.length === 0) {
         if (status) status.textContent = '当前筛选里没有可以播放的歌曲。';
         return;
@@ -536,14 +593,19 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags))];
       if (favoriteButton) {
         const trackIndex = Number(favoriteButton.dataset.favoriteIndex);
         const track = tracks[trackIndex];
-        if (favorites.has(track.src)) favorites.delete(track.src);
-        else favorites.add(track.src);
+        const key = trackKey(track);
+        if (favorites.has(key)) favorites.delete(key);
+        else favorites.add(key);
         saveState();
         renderList();
         return;
       }
       const trackButton = target.closest<HTMLButtonElement>('[data-track-index]');
-      if (trackButton) await switchTrack(Number(trackButton.dataset.trackIndex));
+      if (trackButton) {
+        const trackIndex = Number(trackButton.dataset.trackIndex);
+        if (tracks[trackIndex]?.src) await switchTrack(trackIndex);
+        else updateTrack(trackIndex);
+      }
     });
 
     addEventListener('pagehide', saveState);

@@ -4,7 +4,17 @@ import {
   resolveAmbientVariant,
   type AmbientVariant,
 } from '@/data/ambient';
-import { sakuraCollectMessages } from '@/data/interactions';
+import {
+  expandedFireflyCopies,
+  expandedGalleryCopies,
+  expandedMeteorCopies,
+  expandedSakuraCompleteCopies,
+  expandedSakuraProgressCopies,
+  ginkgoCopies,
+  guestbookGuideCopies,
+  learningCopies,
+  projectCopies,
+} from '@/data/copywriting';
 
 interface Props {
   variant?: AmbientVariant;
@@ -12,30 +22,58 @@ interface Props {
 
 const variant = Astro.props.variant ?? resolveAmbientVariant(Astro.url.pathname);
 const config = ambientEffects[variant];
+const ambientCopies = {
+  firefly: expandedFireflyCopies,
+  ginkgo: ginkgoCopies,
+  gallery: expandedGalleryCopies,
+  learn: learningCopies,
+  meteor: expandedMeteorCopies,
+  guestbook: guestbookGuideCopies,
+  projects: projectCopies,
+  sakuraComplete: expandedSakuraCompleteCopies,
+  sakuraProgress: expandedSakuraProgressCopies,
+};
 ---
 
 <canvas
   class="page-ambient"
   data-page-ambient
   data-config={JSON.stringify(config)}
-  data-collect-messages={JSON.stringify(sakuraCollectMessages)}
+  data-copy={JSON.stringify(ambientCopies)}
   data-variant={variant}
   aria-hidden="true"
 ></canvas>
-{
-  variant === 'sakura' && (
-    <div
-      class="ambient-collect-toast"
-      data-ambient-collect-toast
-      role="status"
-      aria-live="polite"
-      hidden
-    ></div>
-  )
-}
+<div
+  class="ambient-collect-toast"
+  data-ambient-toast
+  role="status"
+  aria-live="polite"
+  hidden
+></div>
+{variant === 'about' && (
+  <dialog class="ambient-wish" data-ambient-wish aria-labelledby="ambient-wish-title">
+    <form method="dialog">
+      <button class="ambient-wish__close" value="close" aria-label="关闭流星许愿">×</button>
+      <span>METEOR NOTE</span>
+      <h2 id="ambient-wish-title">把一句话暂时交给流星</h2>
+      <p data-wish-today>今天还没有留下小愿望</p>
+      <label>
+        <span>最多30个字，只保存在这台设备</span>
+        <input maxlength="30" autocomplete="off" data-wish-input />
+      </label>
+      <button class="button button--primary" type="button" data-wish-save>先替我放在这里</button>
+      <small data-wish-status aria-live="polite"></small>
+    </form>
+  </dialog>
+)}
 
 <script>
   import type { AmbientEffectConfig } from '@/data/ambient';
+  import {
+    entryRandom,
+    localDateKey,
+    pickRandom,
+  } from '@/lib/random';
 
   interface AmbientParticle {
     x: number;
@@ -51,6 +89,9 @@ const config = ambientEffects[variant];
     color: number;
     label: string;
     collectible: boolean;
+    interactive: boolean;
+    drift: number;
+    pauseUntil: number;
   }
 
   interface CollectionState {
@@ -59,17 +100,60 @@ const config = ambientEffects[variant];
     messageIndex?: number;
   }
 
+  interface AmbientCopyPools {
+    firefly: string[];
+    ginkgo: string[];
+    gallery: string[];
+    learn: string[];
+    meteor: string[];
+    guestbook: string[];
+    projects: string[];
+    sakuraComplete: string[];
+    sakuraProgress: string[];
+  }
+
+  interface BurstParticle {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    life: number;
+    color: string;
+  }
+
+  interface Meteor {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    length: number;
+    opacity: number;
+    active: boolean;
+    nextAt: number;
+  }
+
   const MOTION_STORAGE_KEY = 'hdp-motion-effects';
   const COLLECT_STORAGE_PREFIX = 'hdp-sakura-collection';
   const canvas = document.querySelector<HTMLCanvasElement>('[data-page-ambient]');
   const context = canvas?.getContext('2d');
-  const toast = document.querySelector<HTMLElement>('[data-ambient-collect-toast]');
+  const toast = document.querySelector<HTMLElement>('[data-ambient-toast]');
+  const wishDialog = document.querySelector<HTMLDialogElement>('[data-ambient-wish]');
+  const wishInput = wishDialog?.querySelector<HTMLInputElement>('[data-wish-input]');
+  const wishStatus = wishDialog?.querySelector<HTMLElement>('[data-wish-status]');
+  const wishToday = wishDialog?.querySelector<HTMLElement>('[data-wish-today]');
+  const wishSave = wishDialog?.querySelector<HTMLButtonElement>('[data-wish-save]');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const device = navigator as Navigator & { deviceMemory?: number };
   const config = JSON.parse(canvas?.dataset.config || '{}') as AmbientEffectConfig;
-  const collectMessages = JSON.parse(
-    canvas?.dataset.collectMessages || '[]',
-  ) as string[];
+  const copies = JSON.parse(canvas?.dataset.copy || '{}') as AmbientCopyPools;
+  const random = entryRandom(`ambient:${location.pathname}`);
+  const lifeTheme =
+    config.variant === 'life'
+      ? document.documentElement.dataset.theme === 'dark' || random() < 0.46
+        ? 'firefly'
+        : 'ginkgo'
+      : '';
+  if (canvas && lifeTheme) canvas.dataset.lifeTheme = lifeTheme;
 
   let width = 0;
   let height = 0;
@@ -81,17 +165,29 @@ const config = ambientEffects[variant];
   let intersecting = true;
   let destroyed = false;
   let toastTimer = 0;
+  let lastInteractiveIndex = -1;
+  let selectedProjectNode = -1;
+  let projectLinkUntil = 0;
+  let projectLinkFrom = { x: 0, y: 0 };
+  let projectLinkTo = { x: 0, y: 0 };
+  const learningFragments = new Set<string>();
+  const bursts: BurstParticle[] = [];
+  let pointerX = -1000;
+  let pointerY = -1000;
+  let galleryTarget: { x: number; y: number } | null = null;
+  let learningTarget: { x: number; y: number } | null = null;
+  const meteor: Meteor = {
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    length: 80,
+    opacity: 0,
+    active: false,
+    nextAt: 8000 + random() * 10000,
+  };
   let resizeObserver: ResizeObserver | undefined;
   let intersectionObserver: IntersectionObserver | undefined;
-
-  const localDateKey = () => {
-    const now = new Date();
-    return [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, '0'),
-      String(now.getDate()).padStart(2, '0'),
-    ].join('-');
-  };
 
   const collectionKey = `${COLLECT_STORAGE_PREFIX}:${localDateKey()}`;
   const readCollection = (): CollectionState => {
@@ -123,15 +219,17 @@ const config = ambientEffects[variant];
     (navigator.hardwareConcurrency || 0) >= 8 &&
     (!device.deviceMemory || device.deviceMemory >= 8);
   const mobile = window.matchMedia('(max-width: 720px)');
+  const compact = window.matchMedia('(max-width: 480px)');
 
   const particleCount = () => {
-    if (mobile.matches) {
-      return lowPower
-        ? Math.max(5, Math.round(config.counts.mobile * 0.65))
-        : config.counts.mobile;
-    }
-    if (lowPower) return config.counts.low;
-    return highPower ? config.counts.high : config.counts.normal;
+    const base = lowPower
+      ? config.counts.low
+      : highPower
+        ? config.counts.high
+        : config.counts.normal;
+    if (compact.matches) return Math.max(5, Math.round(base * 0.5));
+    if (mobile.matches) return Math.max(6, Math.round(base * 0.7));
+    return base;
   };
 
   const frameInterval = () => {
@@ -140,38 +238,65 @@ const config = ambientEffects[variant];
   };
 
   const createParticle = (index: number, fromEdge = false): AmbientParticle => {
-    const layer = Math.random();
+    const layer = random();
     const entersFromMiddle =
-      config.variant === 'sakura' && fromEdge && Math.random() < 0.13;
+      config.variant === 'sakura' && fromEdge && random() < 0.18;
+    const entersFromSide =
+      fromEdge &&
+      ((config.variant === 'sakura' && random() < 0.16) ||
+        (config.variant === 'life' && lifeTheme === 'ginkgo' && random() < 0.22) ||
+        (config.variant === 'guestbook' && random() < 0.36));
     const y = fromEdge
       ? entersFromMiddle
-        ? height * (0.22 + Math.random() * 0.34)
-        : -32 - Math.random() * height * 0.18
-      : Math.random() * height;
+        ? height * (0.22 + random() * 0.34)
+        : entersFromSide
+          ? height * (0.08 + random() * 0.62)
+          : -42 - random() * height * 0.18
+      : random() * height;
     const baseSize =
-      config.variant === 'learn'
-        ? 9 + Math.random() * 4
+      config.variant === 'sakura'
+        ? 6.8 + random() * 10
+        : config.variant === 'life' && lifeTheme === 'ginkgo'
+          ? 6.4 + random() * 7.8
+        : config.variant === 'learn'
+        ? 9 + random() * 4
         : config.variant === 'guestbook'
-          ? 7 + Math.random() * 6
-          : 2.8 + Math.random() * 6.2;
+          ? 7 + random() * 6
+          : 2.8 + random() * 6.2;
+    const interactive =
+      (config.variant === 'life' && lifeTheme === 'firefly' && index % 5 === 0) ||
+      (config.variant === 'learn' && index % 4 === 0) ||
+      (config.variant === 'projects' && index % 4 === 0) ||
+      (config.variant === 'guestbook' && index % 4 === 0);
     return {
-      x: Math.random() * width,
+      x: entersFromSide ? (random() < 0.5 ? -50 : width + 50) : random() * width,
       y,
-      vx: (Math.random() - 0.44) * config.speed * (0.34 + layer * 0.42),
-      vy: (0.16 + Math.random() * 0.42) * config.speed * (0.58 + layer * 0.65),
-      size: baseSize * (0.72 + layer * 0.5),
+      vx:
+        entersFromSide
+          ? (random() < 0.5 ? 1 : -1) * config.speed * (0.55 + layer)
+          : (random() - 0.44) * config.speed * (0.34 + layer * 0.42),
+      vy:
+        lifeTheme === 'firefly'
+          ? (random() - 0.5) * 0.16
+          : (0.16 + random() * 0.42) * config.speed * (0.58 + layer * 0.65),
+      size: baseSize * (0.68 + layer * 0.72),
       opacity: config.opacity * (0.4 + layer * 0.58),
-      rotation: Math.random() * Math.PI * 2,
-      spin: (Math.random() - 0.5) * 0.012,
-      phase: Math.random() * Math.PI * 2,
+      rotation: random() * Math.PI * 2,
+      spin: (random() - 0.5) * 0.014,
+      phase: random() * Math.PI * 2,
       layer,
-      color: Math.floor(Math.random() * Math.max(1, config.lightColors.length)),
+      color: Math.floor(random() * Math.max(1, config.lightColors.length)),
       label:
-        config.labels[Math.floor(Math.random() * Math.max(1, config.labels.length))] || '',
+        config.variant === 'sakura' && random() < 0.13
+          ? 'flower'
+          : config.labels[Math.floor(random() * Math.max(1, config.labels.length))] || '',
       collectible:
         config.variant === 'sakura' &&
         !collection.completed &&
-        index % 8 === 0,
+        index % 7 === 0,
+      interactive,
+      drift: 0.5 + random() * 1.4,
+      pauseUntil: 0,
     };
   };
 
@@ -185,8 +310,6 @@ const config = ambientEffects[variant];
     pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
     canvas.width = Math.round(width * pixelRatio);
     canvas.height = Math.round(height * pixelRatio);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     particles = Array.from({ length: particleCount() }, (_, index) =>
       createParticle(index),
@@ -207,44 +330,70 @@ const config = ambientEffects[variant];
     context.translate(particle.x, particle.y);
     context.rotate(particle.rotation);
     context.filter = particle.layer < 0.28 ? 'blur(1.35px)' : particle.layer > 0.8 ? 'blur(.2px)' : 'none';
-    context.scale(particle.size, particle.size);
-    context.beginPath();
-    context.moveTo(0, -0.68);
-    context.bezierCurveTo(0.64, -0.5, 0.74, 0.12, 0, 0.74);
-    context.bezierCurveTo(-0.74, 0.12, -0.64, -0.5, 0, -0.68);
     context.fillStyle = colorFor(particle);
     context.globalAlpha = particle.opacity;
-    context.fill();
+    if (particle.label === 'flower') {
+      context.scale(particle.size * 0.72, particle.size * 0.72);
+      for (let petal = 0; petal < 5; petal += 1) {
+        context.save();
+        context.rotate((Math.PI * 2 * petal) / 5);
+        context.beginPath();
+        context.moveTo(0, -0.08);
+        context.bezierCurveTo(0.22, -0.76, 0.72, -0.82, 0, -1.08);
+        context.bezierCurveTo(-0.72, -0.82, -0.22, -0.76, 0, -0.08);
+        context.fill();
+        context.restore();
+      }
+      context.globalAlpha = particle.opacity * 0.72;
+      context.beginPath();
+      context.arc(0, 0, 0.17, 0, Math.PI * 2);
+      context.fill();
+    } else {
+      context.scale(particle.size, particle.size);
+      context.beginPath();
+      context.moveTo(0, -0.68);
+      context.bezierCurveTo(0.64, -0.5, 0.74, 0.12, 0, 0.74);
+      context.bezierCurveTo(-0.74, 0.12, -0.64, -0.5, 0, -0.68);
+      context.fill();
+    }
+    if (particle.collectible) {
+      context.globalAlpha = 0.12 + (Math.sin(particle.phase * 2) + 1) * 0.08;
+      context.strokeStyle = colorFor(particle);
+      context.lineWidth = 0.13;
+      context.stroke();
+    }
     context.restore();
   };
 
   const drawLife = (particle: AmbientParticle) => {
     if (!context) return;
-    const dark = document.documentElement.dataset.theme === 'dark';
     context.save();
     context.translate(particle.x, particle.y);
     context.rotate(particle.rotation);
     context.globalAlpha = particle.opacity;
-    if (dark) {
+    if (lifeTheme === 'firefly') {
       context.shadowColor = colorFor(particle);
-      context.shadowBlur = particle.size * 2.2;
+      context.shadowBlur = particle.size * (particle.interactive ? 3 : 2.2);
       context.fillStyle = colorFor(particle);
       context.beginPath();
       context.arc(0, 0, Math.max(1.2, particle.size * 0.3), 0, Math.PI * 2);
       context.fill();
     } else {
-      context.scale(particle.size * 0.8, particle.size);
+      const flip = 0.34 + Math.abs(Math.cos(particle.phase * 0.72)) * 0.66;
+      context.scale(particle.size * flip, particle.size);
       context.fillStyle = colorFor(particle);
       context.beginPath();
-      context.moveTo(0, -0.8);
-      context.quadraticCurveTo(0.68, -0.08, 0, 0.9);
-      context.quadraticCurveTo(-0.68, -0.08, 0, -0.8);
+      context.moveTo(0, 0.88);
+      context.bezierCurveTo(0.18, 0.35, 0.88, 0.28, 0.9, -0.34);
+      context.quadraticCurveTo(0.45, -0.82, 0, -0.58);
+      context.quadraticCurveTo(-0.45, -0.82, -0.9, -0.34);
+      context.bezierCurveTo(-0.88, 0.28, -0.18, 0.35, 0, 0.88);
       context.fill();
       context.strokeStyle = 'rgba(86, 101, 87, .28)';
       context.lineWidth = 0.08;
       context.beginPath();
-      context.moveTo(0, -0.58);
-      context.lineTo(0, 0.72);
+      context.moveTo(0, -0.48);
+      context.lineTo(0, 1.12);
       context.stroke();
     }
     context.restore();
@@ -254,12 +403,103 @@ const config = ambientEffects[variant];
     if (!context || !particle.label) return;
     context.save();
     context.translate(particle.x, particle.y);
-    context.rotate(Math.sin(particle.phase) * 0.08);
-    context.globalAlpha = particle.opacity;
+      context.rotate(Math.sin(particle.phase) * 0.08);
+    context.globalAlpha =
+      particle.pauseUntil > performance.now()
+        ? particle.opacity * Math.max(0, (particle.pauseUntil - performance.now()) / 900)
+        : particle.opacity;
     context.fillStyle = colorFor(particle);
     context.font = `600 ${particle.size}px "Microsoft YaHei", sans-serif`;
     context.fillText(particle.label, 0, 0);
+    if (particle.label === 'return' || particle.label === 'while') {
+      context.globalAlpha *= 0.55;
+      context.strokeStyle = colorFor(particle);
+      context.beginPath();
+      context.moveTo(-6, 5);
+      context.lineTo(28 + Math.sin(particle.phase) * 8, 5);
+      context.stroke();
+    }
     context.restore();
+  };
+
+  const spawnBurst = (x: number, y: number, color: string) => {
+    for (let index = 0; index < 9; index += 1) {
+      const angle = random() * Math.PI * 2;
+      const speed = 0.45 + random() * 1.15;
+      bursts.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        color,
+      });
+    }
+  };
+
+  const drawBursts = () => {
+    if (!context) return;
+    for (let index = bursts.length - 1; index >= 0; index -= 1) {
+      const burst = bursts[index];
+      burst.x += burst.vx;
+      burst.y += burst.vy;
+      burst.vx *= 0.96;
+      burst.vy *= 0.96;
+      burst.life -= 0.045;
+      if (burst.life <= 0) {
+        bursts.splice(index, 1);
+        continue;
+      }
+      context.save();
+      context.globalAlpha = burst.life * 0.65;
+      context.fillStyle = burst.color;
+      context.beginPath();
+      context.arc(burst.x, burst.y, 1.3 + burst.life, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
+  };
+
+  const startMeteor = (time: number) => {
+    meteor.x = width * (0.25 + random() * 0.65);
+    meteor.y = -30 - random() * 60;
+    meteor.vx = -(2.2 + random() * 2);
+    meteor.vy = 1.2 + random() * 1.6;
+    meteor.length = 70 + random() * 95;
+    meteor.opacity = 0.46 + random() * 0.32;
+    meteor.active = true;
+    meteor.nextAt = time + 8000 + random() * 10000;
+  };
+
+  const drawMeteor = (time: number) => {
+    if (!context || config.variant !== 'about') return;
+    if (!meteor.active && time >= meteor.nextAt) startMeteor(time);
+    if (!meteor.active) return;
+    meteor.x += meteor.vx;
+    meteor.y += meteor.vy;
+    const magnitude = Math.hypot(meteor.vx, meteor.vy) || 1;
+    const tailX = meteor.x - (meteor.vx / magnitude) * meteor.length;
+    const tailY = meteor.y - (meteor.vy / magnitude) * meteor.length;
+    const gradient = context.createLinearGradient(tailX, tailY, meteor.x, meteor.y);
+    gradient.addColorStop(0, 'rgba(255,255,255,0)');
+    const palette =
+      document.documentElement.dataset.theme === 'dark'
+        ? config.darkColors
+        : config.lightColors;
+    gradient.addColorStop(1, palette[0] || '#b8c5be');
+    context.save();
+    context.globalAlpha = meteor.opacity;
+    context.strokeStyle = gradient;
+    context.lineWidth = 1.3;
+    context.beginPath();
+    context.moveTo(tailX, tailY);
+    context.lineTo(meteor.x, meteor.y);
+    context.stroke();
+    context.restore();
+    if (meteor.x < -meteor.length || meteor.y > height + meteor.length) {
+      meteor.active = false;
+      if (random() < 0.08) meteor.nextAt = time + 700 + random() * 900;
+    }
   };
 
   const drawProject = (particle: AmbientParticle) => {
@@ -318,7 +558,7 @@ const config = ambientEffects[variant];
     context.strokeStyle = colorFor(particle);
     context.lineWidth = 1;
     const size = particle.size;
-    if (particle.color % 2 === 0) {
+    if (particle.color % 3 === 0) {
       context.beginPath();
       context.moveTo(-size, -size * 0.5);
       context.lineTo(size, 0);
@@ -326,12 +566,20 @@ const config = ambientEffects[variant];
       context.lineTo(-size * 0.12, 0);
       context.closePath();
       context.stroke();
-    } else {
+    } else if (particle.color % 3 === 1) {
       context.strokeRect(-size, -size * 0.58, size * 2, size * 1.16);
       context.beginPath();
       context.moveTo(-size, -size * 0.58);
       context.lineTo(0, size * 0.12);
       context.lineTo(size, -size * 0.58);
+      context.stroke();
+    } else {
+      context.strokeRect(-size * 0.82, -size * 0.62, size * 1.64, size * 1.24);
+      context.beginPath();
+      context.moveTo(-size * 0.55, -size * 0.22);
+      context.lineTo(size * 0.48, -size * 0.22);
+      context.moveTo(-size * 0.55, size * 0.12);
+      context.lineTo(size * 0.28, size * 0.12);
       context.stroke();
     }
     context.restore();
@@ -381,12 +629,28 @@ const config = ambientEffects[variant];
     const y = ((time * 0.018) % (height + 180)) - 90;
     const gradient = context.createLinearGradient(0, y - 45, 0, y + 45);
     gradient.addColorStop(0, 'rgba(128, 155, 134, 0)');
+    const verifying = Boolean(
+      document.querySelector<HTMLButtonElement>('[data-admin-check] button:disabled'),
+    );
     gradient.addColorStop(0.5, document.documentElement.dataset.theme === 'dark'
-      ? 'rgba(166, 190, 175, .11)'
-      : 'rgba(112, 145, 127, .08)');
+      ? `rgba(166, 190, 175, ${verifying ? '.18' : '.08'})`
+      : `rgba(112, 145, 127, ${verifying ? '.14' : '.06'})`);
     gradient.addColorStop(1, 'rgba(128, 155, 134, 0)');
     context.fillStyle = gradient;
     context.fillRect(0, y - 45, width, 90);
+    context.save();
+    context.globalAlpha = verifying ? 0.1 : 0.045;
+    context.strokeStyle = config.lightColors[0] || '#829b8d';
+    [0.24, 0.53, 0.78].forEach((position, index) => {
+      context.beginPath();
+      context.moveTo(width * position, 0);
+      context.lineTo(
+        width * position + Math.sin(time * 0.0004 + index) * 8,
+        height,
+      );
+      context.stroke();
+    });
+    context.restore();
   };
 
   const drawParticle = (particle: AmbientParticle) => {
@@ -442,10 +706,55 @@ const config = ambientEffects[variant];
         particle.rotation += particle.spin;
         const wind =
           config.variant === 'sakura'
-            ? 0.14 + Math.sin(time * 0.00018) * 0.08
+            ? 0.16 +
+              Math.sin(time * 0.00018) * 0.1 +
+              Math.max(0, Math.sin(time * 0.00043)) ** 8 * 0.42
             : 0;
-        particle.x += particle.vx + wind + Math.sin(particle.phase) * 0.16;
-        particle.y += particle.vy;
+        if (config.variant === 'life' && lifeTheme === 'firefly') {
+          const distance = Math.hypot(pointerX - particle.x, pointerY - particle.y);
+          const pointerInfluence =
+            distance < 110 && distance > 1 && particle.interactive
+              ? (110 - distance) / 110
+              : 0;
+          particle.x +=
+            particle.vx +
+            Math.cos(particle.phase * particle.drift) * 0.34 -
+            ((pointerX - particle.x) / Math.max(distance, 1)) * pointerInfluence * 0.38;
+          particle.y +=
+            particle.vy +
+            Math.sin(particle.phase * 0.82) * 0.25 -
+            ((pointerY - particle.y) / Math.max(distance, 1)) * pointerInfluence * 0.28;
+        } else {
+          particle.x += particle.vx + wind + Math.sin(particle.phase) * 0.16;
+          const ginkgoPaused =
+            config.variant === 'life' &&
+            lifeTheme === 'ginkgo' &&
+            particle.pauseUntil > time;
+          if (!ginkgoPaused) {
+            particle.y += particle.vy * (0.72 + particle.layer * 0.55);
+          } else {
+            particle.x += Math.sin(particle.phase * 1.4) * 0.12;
+          }
+        }
+        if (config.variant === 'gallery' && galleryTarget) {
+          particle.x += (galleryTarget.x - particle.x) * 0.0018;
+          particle.y += (galleryTarget.y - particle.y) * 0.0018;
+        }
+        if (config.variant === 'learn' && learningTarget) {
+          particle.x += (learningTarget.x - particle.x) * 0.0012;
+          particle.y += (learningTarget.y - particle.y) * 0.0012;
+        }
+        if (config.variant === 'learn' && !particle.pauseUntil && random() < 0.00045) {
+          particle.pauseUntil = time + 650 + random() * 500;
+        }
+        if (
+          config.variant === 'life' &&
+          lifeTheme === 'ginkgo' &&
+          particle.pauseUntil < time &&
+          random() < 0.00032
+        ) {
+          particle.pauseUntil = time + 420 + random() * 720;
+        }
 
         if (
           particle.y > height + 45 ||
@@ -456,6 +765,43 @@ const config = ambientEffects[variant];
         }
         drawParticle(particle);
       });
+      if (config.variant === 'projects' && time < projectLinkUntil) {
+        context.save();
+        context.globalAlpha = Math.min(0.45, (projectLinkUntil - time) / 1100);
+        context.strokeStyle = config.lightColors[0] || '#789588';
+        context.setLineDash([5, 7]);
+        context.beginPath();
+        context.moveTo(projectLinkFrom.x, projectLinkFrom.y);
+        context.lineTo(projectLinkTo.x, projectLinkTo.y);
+        context.stroke();
+        context.restore();
+      }
+      if (config.variant === 'projects') {
+        const scanY = (time * 0.012) % Math.max(height, 1);
+        const scan = context.createLinearGradient(0, scanY - 22, 0, scanY + 22);
+        scan.addColorStop(0, 'rgba(128,155,134,0)');
+        scan.addColorStop(0.5, 'rgba(128,155,134,.055)');
+        scan.addColorStop(1, 'rgba(128,155,134,0)');
+        context.fillStyle = scan;
+        context.fillRect(0, scanY - 22, width, 44);
+      }
+      if (
+        config.variant === 'projects' &&
+        time >= projectLinkUntil &&
+        random() < 0.0007
+      ) {
+        const nodes = particles.filter((particle) => particle.interactive);
+        if (nodes.length >= 2) {
+          const first = nodes[Math.floor(random() * nodes.length)];
+          let second = nodes[Math.floor(random() * nodes.length)];
+          if (second === first) second = nodes[(nodes.indexOf(first) + 1) % nodes.length];
+          projectLinkFrom = { x: first.x, y: first.y };
+          projectLinkTo = { x: second.x, y: second.y };
+          projectLinkUntil = time + 900;
+        }
+      }
+      drawMeteor(time);
+      drawBursts();
     }
     animationFrame = requestAnimationFrame(tick);
   };
@@ -501,46 +847,228 @@ const config = ambientEffects[variant];
     }
   };
 
-  const collectPetal = (event: PointerEvent) => {
+  const closestParticle = (
+    event: PointerEvent,
+    predicate: (particle: AmbientParticle) => boolean,
+    radius = 26,
+  ) => {
+    let closestIndex = -1;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    particles.forEach((particle, index) => {
+      if (!predicate(particle)) return;
+      const distance = Math.hypot(event.clientX - particle.x, event.clientY - particle.y);
+      if (distance < Math.max(radius, particle.size * 2.8) && distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+    return closestIndex;
+  };
+
+  const pickCopy = (values: readonly string[], excluded = -1) => {
+    const picked = pickRandom(values, random, excluded);
+    lastInteractiveIndex = picked.index;
+    return picked.value || '';
+  };
+
+  const highlightRandomCard = (selector: string) => {
+    const cards = Array.from(document.querySelectorAll<HTMLElement>(selector));
+    const card = pickRandom(cards, random).value;
+    if (!card) return;
+    card.classList.remove('ambient-highlight');
+    requestAnimationFrame(() => card.classList.add('ambient-highlight'));
+    window.setTimeout(() => card.classList.remove('ambient-highlight'), 1800);
+    return card;
+  };
+
+  const wishStorageKey = `hdp-meteor-wishes:${localDateKey()}`;
+  const readWishes = (): string[] => {
+    try {
+      const value = JSON.parse(localStorage.getItem(wishStorageKey) || '[]') as unknown;
+      return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string').slice(0, 3)
+        : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const renderWishes = (wishes: string[]) => {
+    if (!wishToday) return;
+    wishToday.textContent =
+      wishes.length > 0
+        ? `今天留在这里：${wishes.join(' · ')}`
+        : '今天还没有留下小愿望';
+  };
+
+  const saveWish = () => {
+    if (!wishInput || !wishStatus) return;
+    const value = wishInput.value.trim().replace(/[<>]/gu, '');
+    const length = Array.from(value).length;
+    const wishes = readWishes();
+    if (!value || length > 30) {
+      wishStatus.textContent = '写下1～30个字就好';
+      return;
+    }
+    if (wishes.length >= 3) {
+      wishStatus.textContent = '今天已经替你放好三条了';
+      return;
+    }
+    wishes.push(value);
+    try {
+      localStorage.setItem(wishStorageKey, JSON.stringify(wishes));
+    } catch {
+      wishStatus.textContent = '这次没有保存下来';
+      return;
+    }
+    wishInput.value = '';
+    renderWishes(wishes);
+    wishStatus.textContent = '先替你放在这里';
+  };
+
+  const openWishDialog = () => {
+    if (!wishDialog) return;
+    const wishes = readWishes();
+    renderWishes(wishes);
+    if (!wishDialog.open) wishDialog.showModal();
+    window.setTimeout(() => wishInput?.focus(), 60);
+  };
+
+  const handleAmbientInteraction = (event: PointerEvent) => {
     if (
-      config.variant !== 'sakura' ||
-      collection.completed ||
       !effectsEnabled() ||
       !(event.target instanceof Element) ||
       event.target.closest('button, a, input, textarea, select, [role="button"]')
     ) {
       return;
     }
-    let closestIndex = -1;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    particles.forEach((particle, index) => {
-      if (!particle.collectible) return;
-      const distance = Math.hypot(event.clientX - particle.x, event.clientY - particle.y);
-      if (distance < Math.max(18, particle.size * 2.4) && distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = index;
-      }
-    });
-    if (closestIndex < 0) return;
 
-    collection.count = Math.min(5, collection.count + 1);
-    resetParticle(particles[closestIndex], closestIndex);
-    if (collection.count >= 5) {
-      collection.completed = true;
-      collection.messageIndex =
-        collection.messageIndex ??
-        Math.floor(Math.random() * collectMessages.length);
-      particles.forEach((particle) => {
-        particle.collectible = false;
-      });
-      showToast(
-        collectMessages[collection.messageIndex] || collectMessages[0],
-        5200,
-      );
-    } else {
-      showToast(`接住一片落樱 · ${collection.count}/5`);
+    if (config.variant === 'about' && meteor.active) {
+      const nearMeteor = Math.hypot(event.clientX - meteor.x, event.clientY - meteor.y) < 92;
+      if (nearMeteor) {
+        showToast(pickCopy(copies.meteor, lastInteractiveIndex), 4300);
+        spawnBurst(meteor.x, meteor.y, config.lightColors[0] || '#9aadb5');
+        meteor.active = false;
+        openWishDialog();
+        return;
+      }
     }
-    saveCollection();
+
+    if (config.variant === 'sakura' && !collection.completed) {
+      const index = closestParticle(event, (particle) => particle.collectible, 24);
+      if (index < 0) return;
+      const particle = particles[index];
+      spawnBurst(particle.x, particle.y, colorFor(particle));
+      collection.count = Math.min(5, collection.count + 1);
+      resetParticle(particle, index);
+      if (collection.count >= 5) {
+        collection.completed = true;
+        collection.messageIndex =
+          collection.messageIndex ??
+          Math.floor(random() * copies.sakuraComplete.length);
+        particles.forEach((item) => {
+          item.collectible = false;
+        });
+        showToast(
+          copies.sakuraComplete[collection.messageIndex] || copies.sakuraComplete[0],
+          5200,
+        );
+      } else {
+        const feedback = pickCopy(copies.sakuraProgress, lastInteractiveIndex);
+        showToast(`${feedback} · 已收集 ${collection.count}/5`);
+      }
+      saveCollection();
+      return;
+    }
+
+    if (config.variant === 'life' && lifeTheme === 'firefly') {
+      const index = closestParticle(event, (particle) => particle.interactive);
+      if (index < 0) return;
+      const particle = particles[index];
+      const card = highlightRandomCard('.filterable-grid .post-card');
+      if (card) {
+        const rect = card.getBoundingClientRect();
+        particle.vx = (rect.left + rect.width / 2 - particle.x) * 0.012;
+        particle.vy = (rect.top + rect.height / 2 - particle.y) * 0.012;
+      }
+      spawnBurst(particle.x, particle.y, colorFor(particle));
+      showToast(pickCopy(copies.firefly, lastInteractiveIndex), 4200);
+      return;
+    }
+
+    if (config.variant === 'learn') {
+      const index = closestParticle(event, (particle) => particle.interactive && Boolean(particle.label));
+      if (index < 0) return;
+      const particle = particles[index];
+      const label = particle.label;
+      learningFragments.add(label);
+      spawnBurst(particle.x, particle.y, colorFor(particle));
+      resetParticle(particle, index);
+      showToast(
+        learningFragments.size >= 3
+          ? '今天已经捡到一点知识碎片'
+          : `收下 ${label} · ${learningFragments.size}/3`,
+      );
+      return;
+    }
+
+    if (config.variant === 'projects') {
+      const index = closestParticle(event, (particle) => particle.interactive);
+      if (index < 0) return;
+      const particle = particles[index];
+      spawnBurst(particle.x, particle.y, colorFor(particle));
+      if (selectedProjectNode < 0) {
+        selectedProjectNode = index;
+        showToast('已选中第一个信号节点');
+      } else if (selectedProjectNode !== index) {
+        const first = particles[selectedProjectNode];
+        projectLinkFrom = { x: first.x, y: first.y };
+        projectLinkTo = { x: particle.x, y: particle.y };
+        projectLinkUntil = performance.now() + 1200;
+        selectedProjectNode = -1;
+        highlightRandomCard('.project-card');
+        showToast(pickCopy(copies.projects, lastInteractiveIndex), 3900);
+      }
+      return;
+    }
+
+    if (config.variant === 'guestbook') {
+      const index = closestParticle(event, (particle) => particle.interactive);
+      if (index < 0) return;
+      const particle = particles[index];
+      spawnBurst(particle.x, particle.y, colorFor(particle));
+      showToast(pickCopy(copies.guestbook, lastInteractiveIndex), 4200);
+    }
+  };
+
+  const handlePointerMove = (event: PointerEvent) => {
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    if (!(event.target instanceof Element)) return;
+    if (config.variant === 'gallery') {
+      const card = event.target.closest<HTMLElement>('.user-image-card');
+      if (!card) {
+        galleryTarget = null;
+      } else {
+        const rect = card.getBoundingClientRect();
+        galleryTarget = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        };
+      }
+    }
+    if (config.variant === 'learn') {
+      const card = event.target.closest<HTMLElement>('.post-card');
+      if (!card) {
+        learningTarget = null;
+      } else {
+        const rect = card.getBoundingClientRect();
+        learningTarget = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        };
+      }
+    }
   };
 
   const handleVisibility = () => {
@@ -565,23 +1093,31 @@ const config = ambientEffects[variant];
     clearTimeout(toastTimer);
     resizeObserver?.disconnect();
     intersectionObserver?.disconnect();
-    window.removeEventListener('pointerdown', collectPetal);
+    window.removeEventListener('pointerdown', handleAmbientInteraction);
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('resize', resize);
     window.removeEventListener('hdp:motion-changed', handleMotionChange);
     document.removeEventListener('visibilitychange', handleVisibility);
     reducedMotion.removeEventListener('change', handleMotionChange);
     document.removeEventListener('astro:before-swap', cleanup);
     window.removeEventListener('pagehide', cleanup);
+    wishSave?.removeEventListener('click', saveWish);
     if (canvas) {
       canvas.width = 0;
       canvas.height = 0;
     }
     particles = [];
+    bursts.length = 0;
+    meteor.active = false;
+    galleryTarget = null;
+    learningTarget = null;
   };
 
   if (canvas && context && config.variant) {
     resize();
     resizeObserver = new ResizeObserver(resize);
-    resizeObserver.observe(canvas);
+    resizeObserver.observe(document.documentElement);
+    window.addEventListener('resize', resize, { passive: true });
     const main = document.querySelector('main');
     if (main) {
       intersectionObserver = new IntersectionObserver(
@@ -594,12 +1130,15 @@ const config = ambientEffects[variant];
       );
       intersectionObserver.observe(main);
     }
-    window.addEventListener('pointerdown', collectPetal, { passive: true });
+    window.addEventListener('pointerdown', handleAmbientInteraction, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
     window.addEventListener('hdp:motion-changed', handleMotionChange);
     document.addEventListener('visibilitychange', handleVisibility);
     reducedMotion.addEventListener('change', handleMotionChange);
     document.addEventListener('astro:before-swap', cleanup, { once: true });
     window.addEventListener('pagehide', cleanup, { once: true });
+    wishSave?.addEventListener('click', saveWish);
+    renderWishes(readWishes());
     start();
   }
 </script>

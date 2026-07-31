@@ -1,0 +1,431 @@
+---
+import { starWallCopies } from '@/data/copywriting';
+
+const moods = [
+  ['healing', '治愈'],
+  ['miss', '想念'],
+  ['happy', '开心'],
+  ['calm', '平静'],
+  ['hope', '期待'],
+  ['cheer', '加油'],
+] as const;
+const colors = [
+  ['sage', '灰绿'],
+  ['gold', '柔金'],
+  ['blue', '雾蓝'],
+  ['rose', '灰粉'],
+  ['cream', '米白'],
+] as const;
+---
+
+<section
+  class="star-wall"
+  data-star-wall
+  data-copy={JSON.stringify(starWallCopies)}
+  aria-labelledby="star-wall-title"
+>
+  <header class="interaction-page-heading">
+    <span class="eyebrow">VISITOR STARS</span>
+    <h1 id="star-wall-title">访客星空墙</h1>
+    <p>
+      <span>每颗公开星星只带着一句经过确认的话</span>
+      <span>不会展示身份编号或后台信息</span>
+    </p>
+  </header>
+
+  <div class="star-wall__sky" data-star-sky>
+    <canvas data-star-canvas aria-label="可以拖动和轻微缩放的访客星空"></canvas>
+    <article class="star-wall__card" data-star-card hidden>
+      <button type="button" data-star-close aria-label="关闭星星卡片">×</button>
+      <span data-star-mood></span>
+      <p data-star-message></p>
+      <footer><strong data-star-nickname></strong><time data-star-date></time></footer>
+    </article>
+    <p class="star-wall__sky-status" data-star-sky-status aria-live="polite">
+      正在慢慢点亮公开星星…
+    </p>
+    <button class="star-wall__retry" type="button" data-star-retry hidden>重新加载</button>
+  </div>
+
+  <div class="star-wall__panels">
+    <form class="interaction-form" data-star-form>
+      <div>
+        <span class="eyebrow">LEAVE A STAR</span>
+        <h2>升起一颗星星</h2>
+        <p>每天最多一颗，提交后先进入等待区</p>
+      </div>
+      <label class="interaction-field">
+        <span>一句话</span>
+        <textarea name="message" rows="3" minlength="1" maxlength="30" required data-star-message-input></textarea>
+        <small><span data-star-count>0</span>/30</small>
+      </label>
+      <div class="interaction-form__row">
+        <label class="interaction-field">
+          <span>心情</span>
+          <select name="mood">{moods.map(([value, label]) => <option value={value}>{label}</option>)}</select>
+        </label>
+        <label class="interaction-field">
+          <span>颜色</span>
+          <select name="color">{colors.map(([value, label]) => <option value={value}>{label}</option>)}</select>
+        </label>
+      </div>
+      <button class="button button--primary" type="submit" data-star-submit>让星星升起来</button>
+      <p class="interaction-status" data-star-form-status aria-live="polite">
+        请先通过顶部的游客入口进入
+      </p>
+    </form>
+
+    <section class="interaction-own-list" aria-labelledby="my-stars-title">
+      <div>
+        <span class="eyebrow">MY STARS</span>
+        <h2 id="my-stars-title">我的星星</h2>
+      </div>
+      <div data-my-stars><p class="interaction-empty">登录后可以查看自己的公开状态</p></div>
+    </section>
+  </div>
+</section>
+
+<script>
+  import {
+    createVisitorStar,
+    getMyVisitorStars,
+    getPublicVisitorStars,
+  } from '@/lib/site-interactions';
+  import { entryRandom, hashSeed, pickRandom } from '@/lib/random';
+  import type {
+    OwnStar,
+    PublicStar,
+    StarColor,
+    StarMood,
+  } from '@/types/site-interactions';
+
+  interface StarPoint {
+    data: PublicStar;
+    x: number;
+    y: number;
+    radius: number;
+    phase: number;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-star-wall]');
+  const sky = root?.querySelector<HTMLElement>('[data-star-sky]');
+  const canvas = root?.querySelector<HTMLCanvasElement>('[data-star-canvas]');
+  const context = canvas?.getContext('2d');
+  const skyStatus = root?.querySelector<HTMLElement>('[data-star-sky-status]');
+  const retry = root?.querySelector<HTMLButtonElement>('[data-star-retry]');
+  const card = root?.querySelector<HTMLElement>('[data-star-card]');
+  const form = root?.querySelector<HTMLFormElement>('[data-star-form]');
+  const messageInput = root?.querySelector<HTMLTextAreaElement>('[data-star-message-input]');
+  const count = root?.querySelector<HTMLElement>('[data-star-count]');
+  const submit = root?.querySelector<HTMLButtonElement>('[data-star-submit]');
+  const formStatus = root?.querySelector<HTMLElement>('[data-star-form-status]');
+  const myStars = root?.querySelector<HTMLElement>('[data-my-stars]');
+  const copy = JSON.parse(root?.dataset.copy || '{}') as {
+    empty?: string[];
+    success?: string[];
+    browse?: string[];
+  };
+  const random = entryRandom('visitor-star-wall');
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const mobile = matchMedia('(max-width: 720px)');
+  const palette: Record<StarColor, string> = {
+    sage: '#9eb9aa',
+    gold: '#d4bd83',
+    blue: '#9db9c5',
+    rose: '#d2aaa8',
+    cream: '#e2d9bf',
+  };
+  const moodLabels: Record<StarMood, string> = {
+    healing: '治愈',
+    miss: '想念',
+    happy: '开心',
+    calm: '平静',
+    hope: '期待',
+    cheer: '加油',
+  };
+  const statusLabels: Record<OwnStar['status'], string> = {
+    pending: '等待公开',
+    approved: '已经公开',
+    rejected: '暂未公开',
+    hidden: '已隐藏',
+    archived: '已归档',
+  };
+  let points: StarPoint[] = [];
+  let width = 0;
+  let height = 0;
+  let dpr = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let scale = 1;
+  let dragging = false;
+  let moved = false;
+  let lastX = 0;
+  let lastY = 0;
+  let raf = 0;
+  let busy = false;
+  let destroyed = false;
+
+  const randomCopy = (values: string[] | undefined, fallback: string) =>
+    pickRandom(values || [], random).value || fallback;
+
+  const safeStars = (values: unknown): PublicStar[] =>
+    Array.isArray(values)
+      ? values.filter((item): item is PublicStar => {
+          if (!item || typeof item !== 'object') return false;
+          const value = item as Record<string, unknown>;
+          return (
+            typeof value.nickname === 'string' &&
+            value.nickname.length <= 16 &&
+            typeof value.message === 'string' &&
+            value.message.length >= 1 &&
+            value.message.length <= 30 &&
+            typeof value.createdAt === 'string' &&
+            typeof value.mood === 'string' &&
+            value.mood in moodLabels &&
+            typeof value.color === 'string' &&
+            value.color in palette
+          );
+        })
+      : [];
+
+  const buildPoints = (stars: PublicStar[]) => {
+    points = stars.slice(0, mobile.matches ? 36 : 80).map((star, index) => {
+      const seed = hashSeed(`${star.message}:${star.createdAt}:${index}`);
+      return {
+        data: star,
+        x: 0.08 + ((seed % 1000) / 1000) * 0.84,
+        y: 0.1 + (((seed >>> 10) % 1000) / 1000) * 0.8,
+        radius: 2.8 + ((seed >>> 20) % 5),
+        phase: (seed % 628) / 100,
+      };
+    });
+  };
+
+  const resize = () => {
+    if (!canvas || !context || !sky) return;
+    const rect = sky.getBoundingClientRect();
+    width = rect.width;
+    height = rect.height;
+    dpr = Math.min(devicePixelRatio || 1, 1.5);
+    canvas.width = Math.max(1, Math.round(width * dpr));
+    canvas.height = Math.max(1, Math.round(height * dpr));
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw(performance.now());
+  };
+
+  const draw = (time: number) => {
+    if (!context || destroyed) return;
+    context.clearRect(0, 0, width, height);
+    const glow = context.createRadialGradient(
+      width * 0.52,
+      height * 0.42,
+      20,
+      width * 0.52,
+      height * 0.42,
+      width * 0.7,
+    );
+    glow.addColorStop(0, 'rgba(105,135,123,.18)');
+    glow.addColorStop(1, 'rgba(42,57,58,0)');
+    context.fillStyle = glow;
+    context.fillRect(0, 0, width, height);
+    points.forEach((point, index) => {
+      const x = (point.x * width + offsetX) * scale;
+      const y = (point.y * height + offsetY) * scale;
+      const pulse = reducedMotion.matches
+        ? 1
+        : 0.9 + Math.sin(time * 0.0012 + point.phase) * 0.12;
+      const radius = point.radius * pulse * Math.min(scale, 1.25);
+      context.save();
+      context.globalAlpha = 0.52 + (index % 4) * 0.1;
+      context.shadowColor = palette[point.data.color];
+      context.shadowBlur = radius * 3.2;
+      context.fillStyle = palette[point.data.color];
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    });
+    if (!reducedMotion.matches && !document.hidden) {
+      raf = requestAnimationFrame(draw);
+    }
+  };
+
+  const start = () => {
+    cancelAnimationFrame(raf);
+    raf = 0;
+    draw(performance.now());
+  };
+
+  const loadPublic = async () => {
+    if (skyStatus) skyStatus.textContent = '正在慢慢点亮公开星星…';
+    retry && (retry.hidden = true);
+    const result = await getPublicVisitorStars();
+    if (!result.ok) {
+      if (skyStatus) skyStatus.textContent = result.message;
+      retry && (retry.hidden = false);
+      return;
+    }
+    const stars = safeStars(result.data.stars);
+    buildPoints(stars);
+    if (skyStatus) {
+      skyStatus.textContent =
+        stars.length === 0
+          ? randomCopy(copy.empty, '今晚这片天空还很安静')
+          : randomCopy(copy.browse, '轻轻点击一颗星，看看它留下的话');
+    }
+    start();
+  };
+
+  const renderMyStars = (stars: OwnStar[]) => {
+    if (!myStars) return;
+    myStars.replaceChildren();
+    if (stars.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'interaction-empty';
+      empty.textContent = '你今天还没有在这里留下星星';
+      myStars.append(empty);
+      return;
+    }
+    stars.forEach((star) => {
+      const article = document.createElement('article');
+      const message = document.createElement('p');
+      const meta = document.createElement('small');
+      message.textContent = star.message;
+      meta.textContent = `${statusLabels[star.status]} · ${new Date(star.createdAt).toLocaleDateString('zh-CN')}`;
+      article.append(message, meta);
+      myStars.append(article);
+    });
+  };
+
+  const loadMine = async () => {
+    const result = await getMyVisitorStars();
+    if (!result.ok) {
+      if (myStars) myStars.textContent = result.code === 'signed-out'
+        ? '登录后可以查看自己的公开状态'
+        : result.message;
+      return;
+    }
+    renderMyStars(Array.isArray(result.data.stars) ? result.data.stars : []);
+  };
+
+  const showCard = (point: StarPoint) => {
+    if (!card) return;
+    const mood = card.querySelector<HTMLElement>('[data-star-mood]');
+    const message = card.querySelector<HTMLElement>('[data-star-message]');
+    const nickname = card.querySelector<HTMLElement>('[data-star-nickname]');
+    const date = card.querySelector<HTMLTimeElement>('[data-star-date]');
+    if (mood) mood.textContent = moodLabels[point.data.mood];
+    if (message) message.textContent = point.data.message;
+    if (nickname) nickname.textContent = point.data.nickname;
+    if (date) {
+      date.dateTime = point.data.createdAt;
+      date.textContent = new Date(point.data.createdAt).toLocaleDateString('zh-CN');
+    }
+    card.hidden = false;
+  };
+
+  canvas?.addEventListener('pointerdown', (event) => {
+    dragging = true;
+    moved = false;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas?.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    offsetX += dx / scale;
+    offsetY += dy / scale;
+    lastX = event.clientX;
+    lastY = event.clientY;
+  });
+  canvas?.addEventListener('pointerup', (event) => {
+    dragging = false;
+    canvas.releasePointerCapture(event.pointerId);
+    if (moved) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const nearest = points
+      .map((point) => ({
+        point,
+        distance: Math.hypot(
+          (point.x * width + offsetX) * scale - x,
+          (point.y * height + offsetY) * scale - y,
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    if (nearest && nearest.distance <= 28) showCard(nearest.point);
+  });
+  canvas?.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    scale = Math.max(0.86, Math.min(1.35, scale + (event.deltaY < 0 ? 0.05 : -0.05)));
+  }, { passive: false });
+
+  messageInput?.addEventListener('input', () => {
+    if (count) count.textContent = String(messageInput.value.length);
+  });
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (busy || !submit || !messageInput) return;
+    const data = new FormData(form);
+    busy = true;
+    submit.disabled = true;
+    submit.textContent = '正在升起…';
+    const result = await createVisitorStar({
+      message: messageInput.value,
+      mood: String(data.get('mood')) as StarMood,
+      color: String(data.get('color')) as StarColor,
+    });
+    busy = false;
+    submit.disabled = false;
+    submit.textContent = '让星星升起来';
+    if (!result.ok) {
+      if (formStatus) formStatus.textContent = result.message;
+      return;
+    }
+    messageInput.value = '';
+    if (count) count.textContent = '0';
+    if (formStatus) {
+      formStatus.textContent = randomCopy(
+        copy.success,
+        '星星已经升起，确认公开后会被更多人看见',
+      );
+    }
+    await loadMine();
+  });
+
+  retry?.addEventListener('click', loadPublic);
+  card?.querySelector('[data-star-close]')?.addEventListener('click', () => {
+    card.hidden = true;
+  });
+  const resizeObserver = sky ? new ResizeObserver(resize) : null;
+  if (sky) resizeObserver?.observe(sky);
+  const handleVisibility = () => {
+    if (document.hidden) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    } else {
+      start();
+    }
+  };
+  const cleanup = () => {
+    destroyed = true;
+    cancelAnimationFrame(raf);
+    resizeObserver?.disconnect();
+    document.removeEventListener('visibilitychange', handleVisibility);
+    window.removeEventListener('hdp:auth-changed', loadMine);
+  };
+  document.addEventListener('visibilitychange', handleVisibility);
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+  window.addEventListener('pagehide', cleanup, { once: true });
+  window.addEventListener('hdp:auth-changed', loadMine);
+  resize();
+  void loadPublic();
+  void loadMine();
+</script>

@@ -1,0 +1,467 @@
+---
+const cloudBaseEnabled =
+  import.meta.env.PUBLIC_CLOUDBASE_ENABLED === 'true' &&
+  Boolean((import.meta.env.PUBLIC_CLOUDBASE_ENV_ID || '').trim());
+---
+
+<section
+  class="admin-content"
+  data-admin-content
+  data-enabled={String(cloudBaseEnabled)}
+  aria-labelledby="admin-content-title"
+>
+  <header class="interaction-page-heading">
+    <span class="eyebrow">PROTECTED CONTENT MANAGEMENT</span>
+    <h1 id="admin-content-title">内容管理</h1>
+    <p>先通过现有管理员验证通道确认身份，验证成功前不会读取任何待处理内容</p>
+  </header>
+
+  <section class="admin-content__gate" data-admin-gate>
+    <div>
+      <span>当前状态</span>
+      <strong data-admin-gate-state>
+        {cloudBaseEnabled ? '等待管理员验证' : 'CloudBase 暂未启用'}
+      </strong>
+      <small data-admin-identity>页面不会显示完整 UID 或管理员资料</small>
+    </div>
+    <button
+      class="button button--primary"
+      type="button"
+      data-admin-unlock
+      disabled={!cloudBaseEnabled}
+    >
+      验证并读取待处理内容
+    </button>
+    <p class="interaction-status" data-admin-status aria-live="polite">
+      {cloudBaseEnabled
+        ? '身份确认仍由现有 admin-guestbook 云函数完成'
+        : '公开页面仍可正常浏览'}
+    </p>
+  </section>
+
+  <section class="admin-content__workspace" data-admin-workspace hidden>
+    <div class="admin-content__toolbar">
+      <label>
+        <span>内容类型</span>
+        <select data-admin-kind>
+          <option value="">全部</option>
+          <option value="guestbook">留言</option>
+          <option value="image">访客图片</option>
+          <option value="star">星空墙</option>
+          <option value="bottle">漂流瓶</option>
+        </select>
+      </label>
+      <label>
+        <span>内容状态</span>
+        <select data-admin-content-status>
+          <option value="pending">待处理</option>
+          <option value="approved">已经公开</option>
+          <option value="rejected">暂未公开</option>
+          <option value="hidden">已隐藏</option>
+          <option value="archived">已归档</option>
+        </select>
+      </label>
+      <button class="button button--soft" type="button" data-admin-refresh>
+        刷新列表
+      </button>
+      <small data-admin-expiry></small>
+    </div>
+    <div class="admin-content__list" data-admin-list aria-live="polite">
+      <p class="interaction-empty">验证成功后会在这里显示待处理内容</p>
+    </div>
+  </section>
+</section>
+
+<script>
+  import { restoreVisitorSession } from '@/lib/auth';
+  import { getCloudBaseClient } from '@/lib/cloudbase';
+
+  type ReviewKind = 'guestbook' | 'image' | 'star' | 'bottle';
+  type ContentStatus =
+    | 'pending'
+    | 'approved'
+    | 'rejected'
+    | 'hidden'
+    | 'archived';
+  type TargetStatus = 'approved' | 'rejected' | 'hidden';
+
+  interface ReviewItem {
+    kind: ReviewKind;
+    status: ContentStatus;
+    nickname?: string;
+    content: string;
+    meta?: string;
+    createdAt: string;
+    previewUrl?: string | null;
+    reviewToken: string;
+  }
+
+  interface FunctionPayload {
+    ok?: boolean;
+    code?: string;
+    message?: string;
+    data?: unknown;
+  }
+
+  const root = document.querySelector<HTMLElement>('[data-admin-content]');
+  const unlock = root?.querySelector<HTMLButtonElement>('[data-admin-unlock]');
+  const gateState = root?.querySelector<HTMLElement>('[data-admin-gate-state]');
+  const identity = root?.querySelector<HTMLElement>('[data-admin-identity]');
+  const statusMessage = root?.querySelector<HTMLElement>('[data-admin-status]');
+  const workspace = root?.querySelector<HTMLElement>('[data-admin-workspace]');
+  const kindSelect = root?.querySelector<HTMLSelectElement>('[data-admin-kind]');
+  const contentStatusSelect =
+    root?.querySelector<HTMLSelectElement>('[data-admin-content-status]');
+  const refresh = root?.querySelector<HTMLButtonElement>('[data-admin-refresh]');
+  const expiry = root?.querySelector<HTMLElement>('[data-admin-expiry]');
+  const list = root?.querySelector<HTMLElement>('[data-admin-list]');
+  let verified = false;
+  let busy = false;
+  let destroyed = false;
+  const deleteTimers = new Set<number>();
+
+  const parsePayload = (value: unknown): FunctionPayload => {
+    if (typeof value === 'string') {
+      try {
+        return parsePayload(JSON.parse(value));
+      } catch {
+        return {};
+      }
+    }
+    return value && typeof value === 'object'
+      ? (value as FunctionPayload)
+      : {};
+  };
+
+  const safeMessage = (payload: FunctionPayload, fallback: string) =>
+    typeof payload.message === 'string' && payload.message.length <= 120
+      ? payload.message
+      : fallback;
+
+  const callFunction = async (
+    name: 'admin-guestbook' | 'admin-content',
+    data: Record<string, unknown>,
+  ) => {
+    const cloudbase = await getCloudBaseClient();
+    if (!cloudbase.ok) {
+      return { ok: false, code: 'DISABLED', message: cloudbase.message };
+    }
+    try {
+      const response = await cloudbase.client.app.callFunction({
+        name,
+        data,
+        parse: true,
+      });
+      return parsePayload(response.result);
+    } catch {
+      return {
+        ok: false,
+        code: 'NETWORK_ERROR',
+        message: '内容管理服务暂时没有连接上',
+      };
+    }
+  };
+
+  const isReviewItem = (value: unknown): value is ReviewItem => {
+    if (!value || typeof value !== 'object') return false;
+    const item = value as Record<string, unknown>;
+    return (
+      ['guestbook', 'image', 'star', 'bottle'].includes(String(item.kind)) &&
+      ['pending', 'approved', 'rejected', 'hidden', 'archived'].includes(
+        String(item.status),
+      ) &&
+      typeof item.content === 'string' &&
+      item.content.length <= 300 &&
+      typeof item.createdAt === 'string' &&
+      typeof item.reviewToken === 'string' &&
+      item.reviewToken.length >= 30
+    );
+  };
+
+  const kindLabels: Record<ReviewKind, string> = {
+    guestbook: '留言',
+    image: '访客图片',
+    star: '星空墙',
+    bottle: '漂流瓶',
+  };
+
+  const stateLabels: Record<ContentStatus, string> = {
+    pending: '待处理',
+    approved: '已经公开',
+    rejected: '暂未公开',
+    hidden: '已隐藏',
+    archived: '已归档',
+  };
+
+  const actionOptions = (
+    item: ReviewItem,
+  ): Array<[TargetStatus, string]> => {
+    if (item.status === 'pending') {
+      return [
+        ['approved', '确认公开'],
+        ['rejected', '暂不公开'],
+        ['hidden', '暂时隐藏'],
+      ];
+    }
+    if (item.status === 'approved') return [['hidden', '暂时隐藏']];
+    return [
+      ['approved', '恢复展示'],
+      ...(item.status === 'hidden'
+        ? ([['rejected', '暂不公开']] as Array<[TargetStatus, string]>)
+        : ([['hidden', '暂时隐藏']] as Array<[TargetStatus, string]>)),
+    ];
+  };
+
+  const setButtonsDisabled = (element: HTMLElement, disabled: boolean) => {
+    element.querySelectorAll('button').forEach((button) => {
+      button.disabled = disabled;
+    });
+  };
+
+  const renderItems = (items: ReviewItem[]) => {
+    if (!list) return;
+    list.replaceChildren();
+    if (items.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'interaction-empty';
+      empty.textContent = '目前没有这一类内容，可以晚些时候再回来看看';
+      list.append(empty);
+      return;
+    }
+    items.forEach((item) => {
+      const article = document.createElement('article');
+      const header = document.createElement('header');
+      const kind = document.createElement('span');
+      const date = document.createElement('time');
+      const content = document.createElement('p');
+      const meta = document.createElement('small');
+      const actions = document.createElement('div');
+
+      kind.textContent = `${kindLabels[item.kind]} · ${stateLabels[item.status]}`;
+      date.dateTime = item.createdAt;
+      date.textContent = new Date(item.createdAt).toLocaleString('zh-CN');
+      header.append(kind, date);
+      content.textContent = item.content;
+      meta.textContent = [item.nickname, item.meta].filter(Boolean).join(' · ');
+
+      if (item.kind === 'image' && item.previewUrl?.startsWith('https://')) {
+        const image = document.createElement('img');
+        image.src = item.previewUrl;
+        image.alt = item.content || '访客图片预览';
+        image.loading = 'lazy';
+        image.width = 720;
+        image.height = 540;
+        image.addEventListener(
+          'error',
+          () => {
+            const errorText = document.createElement('p');
+            errorText.className = 'admin-content__preview-error';
+            errorText.textContent =
+              '图片预览链接已经失效，刷新列表后可以重试';
+            image.replaceWith(errorText);
+          },
+          { once: true },
+        );
+        article.append(header, image, content, meta);
+      } else {
+        article.append(header, content, meta);
+      }
+
+      actionOptions(item).forEach(([nextStatus, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.addEventListener('click', async () => {
+          if (busy) return;
+          busy = true;
+          setButtonsDisabled(actions, true);
+          if (statusMessage) {
+            statusMessage.textContent = `正在处理这条${kindLabels[item.kind]}…`;
+          }
+          const result = await callFunction('admin-content', {
+            action: 'reviewContent',
+            reviewToken: item.reviewToken,
+            status: nextStatus,
+          });
+          busy = false;
+          if (result.ok !== true) {
+            setButtonsDisabled(actions, false);
+            if (statusMessage) {
+              statusMessage.textContent = safeMessage(
+                result,
+                '操作没有完成，请刷新后重试',
+              );
+            }
+            return;
+          }
+          article.classList.add('is-reviewed');
+          window.setTimeout(() => article.remove(), 260);
+          if (statusMessage) {
+            statusMessage.textContent = `已将这条内容设为“${label}”`;
+          }
+        });
+        actions.append(button);
+      });
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '永久删除';
+      let deleteArmed = false;
+      let deleteTimer = 0;
+      remove.addEventListener('click', async () => {
+        if (busy) return;
+        if (!deleteArmed) {
+          deleteArmed = true;
+          remove.textContent = '再点一次永久删除';
+          deleteTimer = window.setTimeout(() => {
+            deleteTimers.delete(deleteTimer);
+            deleteArmed = false;
+            remove.textContent = '永久删除';
+          }, 5000);
+          deleteTimers.add(deleteTimer);
+          return;
+        }
+        clearTimeout(deleteTimer);
+        deleteTimers.delete(deleteTimer);
+        busy = true;
+        setButtonsDisabled(actions, true);
+        if (statusMessage) {
+          statusMessage.textContent = `正在永久删除这条${kindLabels[item.kind]}…`;
+        }
+        const result = await callFunction('admin-content', {
+          action: 'deleteContent',
+          reviewToken: item.reviewToken,
+        });
+        busy = false;
+        if (result.ok !== true) {
+          setButtonsDisabled(actions, false);
+          deleteArmed = false;
+          remove.textContent = '永久删除';
+          if (statusMessage) {
+            statusMessage.textContent = safeMessage(
+              result,
+              '删除没有完成，请刷新后重试',
+            );
+          }
+          return;
+        }
+        article.classList.add('is-reviewed');
+        window.setTimeout(() => article.remove(), 260);
+        if (statusMessage) {
+          statusMessage.textContent = `这条${kindLabels[item.kind]}已经永久删除`;
+        }
+      });
+      actions.append(remove);
+      article.append(actions);
+      list.append(article);
+    });
+  };
+
+  const loadContent = async () => {
+    if (!verified || busy || destroyed) return;
+    busy = true;
+    if (refresh) refresh.disabled = true;
+    if (list) list.textContent = '正在读取内容…';
+    const kind = kindSelect?.value || '';
+    const selectedStatus = (contentStatusSelect?.value ||
+      'pending') as ContentStatus;
+    const result = await callFunction('admin-content', {
+      action: 'listContent',
+      status: selectedStatus,
+      ...(kind ? { kind } : {}),
+    });
+    busy = false;
+    if (refresh) refresh.disabled = false;
+    if (result.ok !== true || !result.data || typeof result.data !== 'object') {
+      if (list) {
+        list.textContent = safeMessage(result, '暂时无法读取内容');
+      }
+      return;
+    }
+    const data = result.data as Record<string, unknown>;
+    const items = Array.isArray(data.items)
+      ? data.items.filter(isReviewItem)
+      : [];
+    renderItems(items);
+    if (expiry && typeof data.expiresAt === 'string') {
+      expiry.textContent = `本页操作凭据约在 ${new Date(
+        data.expiresAt,
+      ).toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })} 失效`;
+    }
+  };
+
+  unlock?.addEventListener('click', async () => {
+    if (busy || root?.dataset.enabled !== 'true') return;
+    busy = true;
+    unlock.disabled = true;
+    unlock.textContent = '正在验证…';
+    if (statusMessage) statusMessage.textContent = '正在确认当前网站身份';
+    const session = await restoreVisitorSession();
+    if (!session.ok) {
+      busy = false;
+      unlock.disabled = false;
+      unlock.textContent = '验证并读取待处理内容';
+      if (statusMessage) {
+        statusMessage.textContent =
+          session.code === 'signed-out'
+            ? '请先通过导航栏进入游客身份'
+            : session.message;
+      }
+      return;
+    }
+    if (identity) {
+      identity.textContent = `当前身份：${session.data.nickname} · ${session.data.shortUid}`;
+    }
+    const ping = await callFunction('admin-guestbook', { action: 'ping' });
+    busy = false;
+    unlock.textContent = '重新验证';
+    if (ping.ok !== true) {
+      unlock.disabled = false;
+      if (gateState) {
+        gateState.textContent =
+          ping.code === 'NOT_ADMIN'
+            ? '当前身份不是管理员'
+            : '管理员身份验证失败';
+      }
+      if (statusMessage) {
+        statusMessage.textContent =
+          ping.code === 'NOT_LOGGED_IN'
+            ? '当前身份没有正确传入云函数，请退出后重新进入游客身份'
+            : ping.code === 'NOT_ADMIN'
+              ? '当前 UID 不在管理员名单中'
+              : safeMessage(ping, '管理员身份验证暂时不可用');
+      }
+      return;
+    }
+    verified = true;
+    unlock.disabled = false;
+    if (gateState) gateState.textContent = '管理员身份验证成功';
+    if (statusMessage) statusMessage.textContent = '验证完成，正在读取待处理内容';
+    if (workspace) workspace.hidden = false;
+    await loadContent();
+  });
+
+  refresh?.addEventListener('click', loadContent);
+  kindSelect?.addEventListener('change', loadContent);
+  contentStatusSelect?.addEventListener('change', loadContent);
+
+  const handleAuthChange = () => {
+    verified = false;
+    if (workspace) workspace.hidden = true;
+    if (gateState) gateState.textContent = '身份发生变化，请重新验证';
+  };
+
+  const cleanup = () => {
+    destroyed = true;
+    deleteTimers.forEach((timer) => clearTimeout(timer));
+    deleteTimers.clear();
+    window.removeEventListener('hdp:auth-changed', handleAuthChange);
+  };
+
+  window.addEventListener('hdp:auth-changed', handleAuthChange);
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+  window.addEventListener('pagehide', cleanup, { once: true });
+</script>

@@ -14,6 +14,7 @@ interface Props {
   image?: string;
   type?: 'website' | 'article';
   ambient?: AmbientVariant;
+  noindex?: boolean;
 }
 
 const {
@@ -22,6 +23,7 @@ const {
   image = '/images/placeholders/og.png',
   type = 'website',
   ambient,
+  noindex = false,
 } = Astro.props;
 const pageTitle = title === siteConfig.name ? title : `${title}｜${siteConfig.name}`;
 const canonical = new URL(Astro.url.pathname, siteConfig.url);
@@ -51,6 +53,7 @@ const reactionPage: SiteReactionPage | null =
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex,nofollow" />}
     <meta name="theme-color" content="#f4f1e8" />
     <link rel="canonical" href={canonical} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

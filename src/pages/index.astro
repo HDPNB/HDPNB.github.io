@@ -15,6 +15,7 @@ import { dailyMoods, welcomeMessages } from '@/data/interactions';
 const posts = (await getCollection('blog', ({ data }) => !data.draft))
   .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf())
   .slice(0, 6);
+const homeTitleLines = siteConfig.homeTitle.split('\n');
 ---
 
 <BaseLayout title={siteConfig.name} description={siteConfig.description}>
@@ -22,7 +23,9 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     <div class="container hero__grid">
       <div class="hero__copy">
         <span class="eyebrow">WELCOME, FRIEND</span>
-        <h1>{siteConfig.homeTitle}</h1>
+        <h1 aria-label={siteConfig.homeTitle.replace('\n', '，')}>
+          {homeTitleLines.map((line) => <span>{line}</span>)}
+        </h1>
         <p class="hero__subtitle">{siteConfig.homeSubtitle}</p>
         <div class="hero__note">
           {siteConfig.homeNote.map((paragraph) => <p>{paragraph}</p>)}
@@ -64,6 +67,14 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
   <section class="page-section--tight">
     <div class="container">
       <DailyFortune />
+      <a class="interaction-corner-link" href="/interactions/">
+        <span aria-hidden="true">✦</span>
+        <div>
+          <strong>去互动角落走走</strong>
+          <small>星空墙、漂流瓶、时光胶囊和答案之书都放在那里</small>
+        </div>
+        <span aria-hidden="true">→</span>
+      </a>
     </div>
   </section>
 
@@ -91,25 +102,39 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     </div>
   </section>
   <script>
+    import {
+      browserSeed,
+      dailyRandom,
+      entryRandom,
+      pickRandom,
+    } from '@/lib/random';
+
+    const welcomeRandom = entryRandom('home-welcome');
     const welcomeRoot = document.querySelector<HTMLElement>('[data-home-interactions]');
     const welcomeButton = welcomeRoot?.querySelector<HTMLButtonElement>('[data-random-welcome]');
     const welcomeOutput = document.querySelector<HTMLElement>('[data-welcome-output]');
     welcomeButton?.addEventListener('click', () => {
       const messages = JSON.parse(welcomeRoot?.dataset.welcomes || '[]') as string[];
-      const message = messages[Math.floor(Math.random() * messages.length)];
+      const message = pickRandom(messages, welcomeRandom).value;
       if (welcomeOutput && message) welcomeOutput.textContent = message;
     });
 
     const moodButton = document.querySelector<HTMLButtonElement>('[data-random-mood]');
     const moodText = moodButton?.querySelector<HTMLElement>('[data-mood-text]');
     const moods = JSON.parse(moodButton?.dataset.moods || '[]') as string[];
-    const updateMood = () => {
+    const moodRandom = entryRandom('home-mood-change');
+    let moodIndex = -1;
+    const updateMood = (daily = false) => {
       if (!moodText || moods.length === 0) return;
-      const current = moodText.textContent;
-      const candidates = moods.filter((mood) => mood !== current);
-      moodText.textContent = candidates[Math.floor(Math.random() * candidates.length)] || moods[0];
+      const picked = pickRandom(
+        moods,
+        daily ? dailyRandom(`${browserSeed()}:home-mood`) : moodRandom,
+        moodIndex,
+      );
+      moodIndex = picked.index;
+      moodText.textContent = picked.value || moods[0];
     };
-    updateMood();
-    moodButton?.addEventListener('click', updateMood);
+    updateMood(true);
+    moodButton?.addEventListener('click', () => updateMood(false));
   </script>
 </BaseLayout>

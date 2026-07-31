@@ -1,19 +1,20 @@
 ---
 import {
   memoryCardMessages,
-  memorySceneQuotes,
 } from '@/data/interactions';
+import { memoryObjectCopies } from '@/data/copywriting';
 ---
 
 <div
   class="memory-scene"
   data-memory-scene
   data-state="fallback"
-  data-quotes={JSON.stringify(memorySceneQuotes)}
+  data-object-quotes={JSON.stringify(memoryObjectCopies)}
   data-cards={JSON.stringify(memoryCardMessages)}
   aria-label="漂浮的记忆胶囊互动场景"
 >
   <canvas class="memory-scene__canvas" data-memory-canvas aria-hidden="true"></canvas>
+  <span class="memory-scene__pulse" data-memory-pulse aria-hidden="true"></span>
 
   <div class="memory-scene__fallback" aria-hidden="false">
     <span class="memory-scene__halo" aria-hidden="true"></span>
@@ -84,7 +85,7 @@ import {
     aria-live="polite"
     hidden
   >
-    <span>今日记忆卡</span>
+    <span data-memory-complete-meta>今日记忆卡</span>
     <p data-memory-complete-text></p>
     <button type="button" data-memory-complete-close>收好这张卡</button>
   </div>
@@ -108,10 +109,24 @@ import {
     Vector2,
     WebGLRenderer,
   } from 'three';
+  import {
+    entryRandom,
+    pickRandom,
+  } from '@/lib/random';
+  import {
+    drawDailyMemoryCard,
+    getDailyMemoryState,
+  } from '@/lib/site-interactions';
+  import type { DailyDrawState } from '@/types/site-interactions';
 
   interface MemoryState {
     lit: number[];
-    cardIndex?: number;
+  }
+
+  interface MemoryCardCopy {
+    text: string;
+    subtitle: string;
+    mood: string;
   }
 
   const idleApi = window as unknown as {
@@ -128,9 +143,18 @@ import {
   const messageText = root?.querySelector<HTMLElement>('[data-memory-message-text]');
   const completeCard = root?.querySelector<HTMLElement>('[data-memory-complete]');
   const completeText = root?.querySelector<HTMLElement>('[data-memory-complete-text]');
+  const completeMeta = root?.querySelector<HTMLElement>('[data-memory-complete-meta]');
   const cardOpenButton = root?.querySelector<HTMLButtonElement>('[data-memory-card-open]');
-  const quotes = JSON.parse(root?.dataset.quotes || '[]') as string[];
-  const cardMessages = JSON.parse(root?.dataset.cards || '[]') as string[];
+  const objectQuotes = JSON.parse(root?.dataset.objectQuotes || '{}') as {
+    capsule?: string[];
+    orb?: string[];
+    paper?: string[];
+  };
+  const cardMessages = JSON.parse(root?.dataset.cards || '[]') as MemoryCardCopy[];
+  const pulse = root?.querySelector<HTMLElement>('[data-memory-pulse]');
+  const sceneRandom = entryRandom('memory-scene');
+  const quoteRandom = entryRandom('memory-quotes');
+  const lastQuoteIndices = [-1, -1, -1];
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const mobile = window.matchMedia('(max-width: 720px)');
   const device = navigator as Navigator & { deviceMemory?: number };
@@ -194,13 +218,14 @@ import {
         : [];
       return {
         lit,
-        cardIndex: typeof value.cardIndex === 'number' ? value.cardIndex : undefined,
       };
     } catch {
       return { lit: [] };
     }
   };
   let memoryState = readMemoryState();
+  let dailyCardState: DailyDrawState | null = null;
+  let cardBusy = false;
 
   const saveMemoryState = () => {
     try {
@@ -249,7 +274,15 @@ import {
       button.classList.toggle('is-lit', active);
       button.setAttribute('aria-pressed', String(active));
     });
-    if (cardOpenButton) cardOpenButton.hidden = memoryState.lit.length < 3;
+    if (cardOpenButton) {
+      cardOpenButton.hidden = memoryState.lit.length < 3;
+      cardOpenButton.disabled = cardBusy || dailyCardState?.reachedLimit === true;
+      cardOpenButton.textContent = dailyCardState?.reachedLimit
+        ? '今天的三段记忆已经收好'
+        : dailyCardState
+          ? `今日记忆卡 · 还剩 ${dailyCardState.remainingCount} 次`
+          : '今日记忆卡';
+    }
   };
 
   const hideMessage = () => {
@@ -269,18 +302,48 @@ import {
     messageTimer = window.setTimeout(hideMessage, 6500);
   };
 
-  const revealCompleteCard = () => {
+  const showCompleteCard = (copy: MemoryCardCopy, state: DailyDrawState) => {
     if (!completeCard || !completeText || cardMessages.length === 0) return;
     hideMessage();
-    if (memoryState.cardIndex === undefined) {
-      memoryState.cardIndex = Math.floor(Math.random() * cardMessages.length);
-      saveMemoryState();
+    completeText.textContent = copy.text;
+    if (completeMeta) {
+      completeMeta.textContent = `${copy.subtitle} · ${copy.mood} · ${state.todayCount}/${state.limit}`;
     }
-    completeText.textContent =
-      cardMessages[memoryState.cardIndex % cardMessages.length] ||
-      cardMessages[0];
     completeCard.hidden = false;
     requestAnimationFrame(() => completeCard.classList.add('is-visible'));
+  };
+
+  const revealCompleteCard = async () => {
+    if (cardBusy || memoryState.lit.length < 3 || cardMessages.length === 0) return;
+    cardBusy = true;
+    renderLights();
+    const result = await drawDailyMemoryCard();
+    cardBusy = false;
+    if (result.ok) {
+      dailyCardState = result.data;
+      renderLights();
+      if (result.data.card) {
+        const copy = cardMessages[result.data.card.index % cardMessages.length];
+        if (copy) showCompleteCard(copy, result.data);
+      }
+      return;
+    }
+    if (result.data) {
+      dailyCardState = result.data;
+      renderLights();
+      const latest = result.data.cards[result.data.cards.length - 1];
+      if (latest) {
+        const copy = cardMessages[latest.index % cardMessages.length];
+        if (copy) showCompleteCard(copy, result.data);
+      }
+    }
+    showMessage(result.message);
+  };
+
+  const syncDailyCardState = async () => {
+    const result = await getDailyMemoryState();
+    if (result.ok) dailyCardState = result.data;
+    renderLights();
   };
 
   const hideCompleteCard = () => {
@@ -291,7 +354,25 @@ import {
     }, 260);
   };
 
-  const activateMemory = (index: number) => {
+  const pulsePositions = [
+    { x: 50, y: 50 },
+    { x: 24, y: 28 },
+    { x: 76, y: 28 },
+  ];
+
+  const showPulse = (index: number, point?: { x: number; y: number }) => {
+    if (!pulse || !root) return;
+    const fallback = pulsePositions[index] || pulsePositions[0];
+    const rect = root.getBoundingClientRect();
+    const x = point ? ((point.x - rect.left) / rect.width) * 100 : fallback.x;
+    const y = point ? ((point.y - rect.top) / rect.height) * 100 : fallback.y;
+    pulse.style.left = `${Math.max(4, Math.min(96, x))}%`;
+    pulse.style.top = `${Math.max(4, Math.min(96, y))}%`;
+    pulse.classList.remove('is-active');
+    requestAnimationFrame(() => pulse.classList.add('is-active'));
+  };
+
+  const activateMemory = (index: number, point?: { x: number; y: number }) => {
     if (!Number.isInteger(index) || index < 0 || index > 2) return;
     if (performance.now() - lastMessageAt < 550) return;
     lastMessageAt = performance.now();
@@ -302,14 +383,23 @@ import {
       saveMemoryState();
       renderLights();
     }
-    const candidates = quotes.filter((_, quoteIndex) => quoteIndex % 3 === index);
-    const source = candidates.length ? candidates : quotes;
-    const quote = source[Math.floor(Math.random() * source.length)];
+    const sources = [
+      objectQuotes.capsule || [],
+      objectQuotes.orb || [],
+      objectQuotes.paper || [],
+    ];
+    const source = sources[index] || [];
+    const picked = pickRandom(source, quoteRandom, lastQuoteIndices[index]);
+    lastQuoteIndices[index] = picked.index;
+    const quote = picked.value;
+    showPulse(index, point);
     if (quote) showMessage(quote);
 
     if (memoryState.lit.length === 3) {
       clearTimeout(completeTimer);
-      completeTimer = window.setTimeout(revealCompleteCard, 900);
+      completeTimer = window.setTimeout(() => {
+        void revealCompleteCard();
+      }, 900);
     }
   };
 
@@ -364,17 +454,17 @@ import {
     const elapsed = time * 0.001;
 
     if (!dragging) {
-      dragYaw *= 0.975;
-      dragPitch *= 0.975;
+      dragYaw *= 0.982;
+      dragPitch *= 0.982;
     }
     middleGroup.rotation.y +=
-      (pointerX * 0.2 + dragYaw - middleGroup.rotation.y) * 0.045;
+      (pointerX * 0.26 + dragYaw - middleGroup.rotation.y) * 0.045;
     middleGroup.rotation.x +=
-      (pointerY * 0.12 + dragPitch - middleGroup.rotation.x) * 0.045;
+      (pointerY * 0.15 + dragPitch - middleGroup.rotation.x) * 0.045;
     foregroundGroup.rotation.y +=
-      (pointerX * 0.3 + dragYaw * 1.18 - foregroundGroup.rotation.y) * 0.05;
+      (pointerX * 0.38 + dragYaw * 1.2 - foregroundGroup.rotation.y) * 0.05;
     foregroundGroup.rotation.x +=
-      (pointerY * 0.17 + dragPitch * 1.18 - foregroundGroup.rotation.x) * 0.05;
+      (pointerY * 0.21 + dragPitch * 1.2 - foregroundGroup.rotation.x) * 0.05;
     backgroundGroup.rotation.y +=
       (-pointerX * 0.08 - backgroundGroup.rotation.y) * 0.025;
     backgroundGroup.rotation.x +=
@@ -389,7 +479,14 @@ import {
           ? child.userData.baseY
           : child.position.y;
       child.position.y =
-        baseY + Math.sin(elapsed * (0.48 + (index % 3) * 0.08) + index) * 0.035;
+        baseY +
+        Math.sin(
+          elapsed * (0.42 + (index % 4) * 0.095) +
+            (typeof child.userData.floatPhase === 'number'
+              ? child.userData.floatPhase
+              : index),
+        ) *
+          (0.025 + (index % 3) * 0.012);
       child.rotation.z += index % 2 === 0 ? 0.00055 : -0.00042;
     });
     updateInteractiveObjects();
@@ -452,7 +549,7 @@ import {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 0.93;
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 
       backgroundGroup = new THREE.Group();
@@ -470,8 +567,13 @@ import {
       ) => {
         const object = new THREE.Mesh(geometry, material) as Mesh;
         object.position.set(...position);
-        object.rotation.set(...rotation);
+        object.rotation.set(
+          rotation[0] + (sceneRandom() - 0.5) * 0.045,
+          rotation[1] + (sceneRandom() - 0.5) * 0.085,
+          rotation[2] + (sceneRandom() - 0.5) * 0.065,
+        );
         object.userData.baseY = position[1];
+        object.userData.floatPhase = sceneRandom() * Math.PI * 2;
         object.castShadow = true;
         object.receiveShadow = true;
         if (memoryIndex !== undefined) {
@@ -612,9 +714,9 @@ import {
       const starPositions: number[] = [];
       for (let index = 0; index < 54; index += 1) {
         starPositions.push(
-          (Math.random() - 0.5) * 7.8,
-          (Math.random() - 0.5) * 5.9,
-          -1.8 - Math.random() * 3.4,
+          (sceneRandom() - 0.5) * 7.8,
+          (sceneRandom() - 0.5) * 5.9,
+          -1.8 - sceneRandom() * 3.4,
         );
       }
       const starGeometry = new THREE.BufferGeometry();
@@ -739,7 +841,9 @@ import {
       ) < 8
     ) {
       const memoryIndex = updateRaycast(event);
-      if (memoryIndex >= 0) activateMemory(memoryIndex);
+      if (memoryIndex >= 0) {
+        activateMemory(memoryIndex, { x: event.clientX, y: event.clientY });
+      }
     }
     dragging = false;
     activePointerId = -1;
@@ -766,11 +870,17 @@ import {
       return;
     }
     if (event.target.closest('[data-memory-card-open]')) {
-      revealCompleteCard();
+      void revealCompleteCard();
       return;
     }
     const trigger = event.target.closest<HTMLElement>('[data-memory-trigger]');
-    if (trigger) activateMemory(Number(trigger.dataset.memoryTrigger));
+    if (trigger) {
+      const rect = trigger.getBoundingClientRect();
+      activateMemory(Number(trigger.dataset.memoryTrigger), {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+    }
   };
 
   const handleStateChange = () => {
@@ -783,6 +893,10 @@ import {
     }
     if (canAnimate()) start();
     else stop();
+  };
+
+  const handleAuthChange = () => {
+    void syncDailyCardState();
   };
 
   const cleanup = () => {
@@ -800,6 +914,7 @@ import {
     root?.removeEventListener('pointerleave', handlePointerLeave);
     root?.removeEventListener('click', handleRootClick);
     window.removeEventListener('hdp:motion-changed', handleStateChange);
+    window.removeEventListener('hdp:auth-changed', handleAuthChange);
     document.removeEventListener('visibilitychange', handleStateChange);
     reducedMotion.removeEventListener('change', handleStateChange);
     document.removeEventListener('astro:before-swap', cleanup);
@@ -820,6 +935,7 @@ import {
 
   if (root && canvas) {
     renderLights();
+    void syncDailyCardState();
 
     observer = new IntersectionObserver(
       ([entry]) => {
@@ -843,6 +959,7 @@ import {
     root.addEventListener('pointerleave', handlePointerLeave);
     root.addEventListener('click', handleRootClick);
     window.addEventListener('hdp:motion-changed', handleStateChange);
+    window.addEventListener('hdp:auth-changed', handleAuthChange);
     document.addEventListener('visibilitychange', handleStateChange);
     reducedMotion.addEventListener('change', handleStateChange);
     document.addEventListener('astro:before-swap', cleanup, { once: true });

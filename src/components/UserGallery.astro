@@ -48,7 +48,7 @@ const enabled =
       </button>
     </div>
     <p class="gallery-state gallery-state--quiet" data-gallery-own-login>
-      以游客身份进入后，可以在这里看到自己的待审核、已公开、未通过和仅自己可见图片。
+      以游客身份进入后，可以在这里看到自己的等待公开、已经公开、暂未公开和仅自己可见图片。
     </p>
     <div class="gallery-skeleton" data-gallery-own-loading hidden aria-label="正在加载我的图片">
       {Array.from({ length: 3 }, () => <span></span>)}
@@ -92,9 +92,9 @@ const enabled =
   let ownLoadingActive = false;
 
   const statusLabels: Record<UserImageStatus, string> = {
-    pending: '等待审核',
-    approved: '已公开',
-    rejected: '未通过审核',
+    pending: '等待公开',
+    approved: '已经公开',
+    rejected: '暂未公开',
   };
 
   interface GalleryCardImage {
@@ -170,6 +170,43 @@ const enabled =
     }
 
     article.append(media, body);
+    if (!own) {
+      const flip = document.createElement('button');
+      flip.type = 'button';
+      flip.className = 'user-image-card__flip';
+      flip.textContent = '↻';
+      flip.setAttribute('aria-label', '翻面查看照片说明');
+      flip.setAttribute('aria-pressed', 'false');
+      flip.title = '翻面查看照片说明';
+
+      const back = document.createElement('div');
+      back.className = 'user-image-card__back';
+      back.setAttribute('aria-hidden', 'true');
+      const backLabel = document.createElement('span');
+      const backDescription = document.createElement('p');
+      const backMeta = document.createElement('small');
+      const flipBack = document.createElement('button');
+      backLabel.textContent = 'PHOTO NOTE';
+      backDescription.textContent = image.description || '这张照片没有附带说明';
+      backMeta.textContent = `${image.nickname} · ${formatDate(image.createdAt)}`;
+      flipBack.type = 'button';
+      flipBack.textContent = '翻回照片';
+      flipBack.setAttribute('aria-label', '翻回照片正面');
+      back.append(backLabel, backDescription, backMeta, flipBack);
+
+      const setFlipped = (flipped: boolean) => {
+        article.classList.toggle('is-flipped', flipped);
+        flip.setAttribute('aria-pressed', String(flipped));
+        back.setAttribute('aria-hidden', String(!flipped));
+        media.tabIndex = flipped ? -1 : 0;
+        flip.tabIndex = flipped ? -1 : 0;
+        if (flipped) flipBack.focus();
+        else flip.focus();
+      };
+      flip.addEventListener('click', () => setFlipped(true));
+      flipBack.addEventListener('click', () => setFlipped(false));
+      article.append(flip, back);
+    }
     return article;
   };
 
