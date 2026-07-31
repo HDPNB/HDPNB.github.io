@@ -29,6 +29,9 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+        env:
+          PUBLIC_CLOUDBASE_ENV_ID: ${{ secrets.PUBLIC_CLOUDBASE_ENV_ID }}
+          PUBLIC_CLOUDBASE_ENABLED: ${{ secrets.PUBLIC_CLOUDBASE_ENABLED }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
