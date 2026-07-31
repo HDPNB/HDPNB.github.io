@@ -65,7 +65,10 @@ const enabled =
     SiteReactionState,
   } from '@/types/site-interactions';
 
+  const setupSiteReactions = () => {
   const root = document.querySelector<HTMLElement>('[data-site-reactions]');
+  if (!root || root.dataset.siteReactionsReady === 'true') return;
+  root.dataset.siteReactionsReady = 'true';
   const status = root?.querySelector<HTMLElement>('[data-site-reactions-status]');
   const retry = root?.querySelector<HTMLButtonElement>('[data-site-reactions-retry]');
   const buttons = Array.from(
@@ -162,5 +165,11 @@ const enabled =
 
   retry?.addEventListener('click', load);
   window.addEventListener('hdp:auth-changed', load);
+  document.addEventListener('astro:before-swap', () => {
+    window.removeEventListener('hdp:auth-changed', load);
+  }, { once: true });
   load();
+  };
+
+  document.addEventListener('astro:page-load', setupSiteReactions);
 </script>

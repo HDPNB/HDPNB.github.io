@@ -30,7 +30,10 @@ const { slug } = Astro.props;
 </section>
 
 <script>
+  const setupArticleReactions = () => {
   document.querySelectorAll<HTMLElement>('[data-article-reactions]').forEach((root) => {
+    if (root.dataset.articleReactionsReady === 'true') return;
+    root.dataset.articleReactionsReady = 'true';
     const key = `hdp-article-reactions:${root.dataset.slug}`;
     let selected = new Set<string>();
     try {
@@ -58,4 +61,7 @@ const { slug } = Astro.props;
     });
     render();
   });
+  };
+
+  document.addEventListener('astro:page-load', setupArticleReactions);
 </script>

@@ -41,7 +41,10 @@ import { answerBookEntries } from '@/data/answer-book';
   import type { AnswerBookEntry } from '@/data/answer-book';
   import { entryRandom, pickRandom } from '@/lib/random';
 
+  const setupAnswerBook = () => {
   const root = document.querySelector<HTMLElement>('[data-answer-book]');
+  if (!root || root.dataset.answerBookReady === 'true') return;
+  root.dataset.answerBookReady = 'true';
   const input = root?.querySelector<HTMLTextAreaElement>('[data-answer-question]');
   const count = root?.querySelector<HTMLElement>('[data-answer-count]');
   const open = root?.querySelector<HTMLButtonElement>('[data-answer-open]');
@@ -96,4 +99,7 @@ import { answerBookEntries } from '@/data/answer-book';
       if (status) status.textContent = '暂时没能复制，可以手动选中文字';
     }
   });
+  };
+
+  document.addEventListener('astro:page-load', setupAnswerBook);
 </script>

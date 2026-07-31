@@ -78,7 +78,10 @@ import { timeCapsuleCopies } from '@/data/copywriting';
   import { entryRandom, pickRandom } from '@/lib/random';
   import type { CapsuleSummary } from '@/types/site-interactions';
 
+  const setupTimeCapsule = () => {
   const root = document.querySelector<HTMLElement>('[data-time-capsule]');
+  if (!root || root.dataset.timeCapsuleReady === 'true') return;
+  root.dataset.timeCapsuleReady = 'true';
   const form = root?.querySelector<HTMLFormElement>('[data-capsule-form]');
   const titleInput = root?.querySelector<HTMLInputElement>('[data-capsule-title]');
   const contentInput = root?.querySelector<HTMLTextAreaElement>('[data-capsule-content]');
@@ -259,4 +262,7 @@ import { timeCapsuleCopies } from '@/data/copywriting';
   document.addEventListener('astro:before-swap', cleanup, { once: true });
   window.addEventListener('pagehide', cleanup, { once: true });
   void loadCapsules();
+  };
+
+  document.addEventListener('astro:page-load', setupTimeCapsule);
 </script>

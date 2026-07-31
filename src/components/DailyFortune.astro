@@ -47,7 +47,10 @@ import {
     text: string;
   }
 
+  const setupDailyFortune = () => {
   const root = document.querySelector<HTMLElement>('[data-daily-fortune]');
+  if (!root || root.dataset.dailyFortuneReady === 'true') return;
+  root.dataset.dailyFortuneReady = 'true';
   const draw = root?.querySelector<HTMLButtonElement>('[data-fortune-draw]');
   const change = root?.querySelector<HTMLButtonElement>('[data-fortune-change]');
   const card = root?.querySelector<HTMLElement>('[data-fortune-card]');
@@ -70,17 +73,6 @@ import {
   const fortuneAt = (index: number) =>
     fortunes.length > 0 ? fortunes[index % fortunes.length] : undefined;
 
-  const cacheState = (state: DailyDrawState) => {
-    try {
-      localStorage.setItem(
-        `hdp-daily-fortune-cache:${state.date}`,
-        JSON.stringify(state),
-      );
-    } catch {
-      // 缓存不可用时，云端次数仍然有效。
-    }
-  };
-
   const showCard = (index: number) => {
     const fortune = fortuneAt(index);
     if (!fortune || !card || !kind || !text || !change) return;
@@ -96,7 +88,6 @@ import {
 
   const renderState = (state: DailyDrawState, showLatest = true) => {
     currentState = state;
-    cacheState(state);
     if (showLatest && state.cards.length > 0) {
       showCard(state.cards[state.cards.length - 1].index);
     }
@@ -104,12 +95,12 @@ import {
       draw.disabled = busy || state.reachedLimit;
       draw.textContent = state.reachedLimit
         ? '今天的三张签已经收好'
-        : `再抽一张 · 还剩 ${state.remainingCount} 次`;
+        : `再抽一张 · 还剩 ${state.remaining} 次`;
     }
     setStatus(
       state.reachedLimit
         ? '今天的三张签已经收好，明天再来看看'
-        : `今天已抽 ${state.todayCount}/${state.limit} 张，按北京时间自动重置`,
+        : `今天已抽 ${state.used}/${state.limit} 张，按北京时间自动重置`,
     );
   };
 
@@ -164,4 +155,7 @@ import {
   document.addEventListener('astro:before-swap', cleanup, { once: true });
   window.addEventListener('pagehide', cleanup, { once: true });
   void initialize();
+  };
+
+  document.addEventListener('astro:page-load', setupDailyFortune);
 </script>

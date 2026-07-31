@@ -65,7 +65,10 @@ const enabled =
   } from '@/lib/guestbook';
   import type { GuestbookMessageDocument, GuestbookStatus } from '@/types/guestbook';
 
+  const setupCloudBaseGuestbook = () => {
   const root = document.querySelector<HTMLElement>('[data-cloud-guestbook]');
+  if (!root || root.dataset.guestbookReady === 'true') return;
+  root.dataset.guestbookReady = 'true';
   const active = root?.querySelector<HTMLElement>('[data-guestbook-active]');
   const unavailable = root?.querySelector<HTMLElement>('[data-guestbook-unavailable]');
   const login = root?.querySelector<HTMLElement>('[data-guestbook-login]');
@@ -196,6 +199,12 @@ const enabled =
 
   refresh?.addEventListener('click', loadMessages);
   window.addEventListener('hdp:auth-changed', refreshIdentity);
+  document.addEventListener('astro:before-swap', () => {
+    window.removeEventListener('hdp:auth-changed', refreshIdentity);
+  }, { once: true });
 
   if (root?.dataset.enabled === 'true') refreshIdentity();
+  };
+
+  document.addEventListener('astro:page-load', setupCloudBaseGuestbook);
 </script>

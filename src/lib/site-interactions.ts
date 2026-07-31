@@ -2,6 +2,7 @@ import { getCloudBaseClient } from '@/lib/cloudbase';
 import type {
   SiteInteractionResult,
   DailyDrawResult,
+  DailyDrawOverviewResult,
   DailyDrawState,
   InteractionApiResult,
   OwnStar,
@@ -26,6 +27,17 @@ const REACTIONS: SiteReactionId[] = [
   'cheer',
   'miss',
 ];
+
+function createRequestId(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+
+  return Array.from(
+    crypto.getRandomValues(new Uint8Array(16)),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
+}
 
 function isReaction(value: unknown): value is SiteReactionId {
   return typeof value === 'string' && REACTIONS.includes(value as SiteReactionId);
@@ -189,14 +201,20 @@ function parseDailyDrawState(
     cardSource.index >= 0
       ? { index: cardSource.index }
       : null;
+  const used =
+    typeof source.used === 'number' ? source.used : source.todayCount;
+  const remaining =
+    typeof source.remaining === 'number'
+      ? source.remaining
+      : source.remainingCount;
   if (
     source.action !== action ||
     typeof source.date !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}$/u.test(source.date) ||
-    typeof source.todayCount !== 'number' ||
-    !Number.isInteger(source.todayCount) ||
-    typeof source.remainingCount !== 'number' ||
-    !Number.isInteger(source.remainingCount) ||
+    typeof used !== 'number' ||
+    !Number.isInteger(used) ||
+    typeof remaining !== 'number' ||
+    !Number.isInteger(remaining) ||
     source.limit !== 3
   ) {
     return null;
@@ -206,11 +224,70 @@ function parseDailyDrawState(
     date: source.date,
     card,
     cards,
-    todayCount: Math.max(0, source.todayCount),
-    remainingCount: Math.max(0, source.remainingCount),
+    used: Math.max(0, used),
+    remaining: Math.max(0, remaining),
+    todayCount: Math.max(0, used),
+    remainingCount: Math.max(0, remaining),
     limit: 3,
-    reachedLimit: source.reachedLimit === true,
+    reachedLimit: source.reachedLimit === true || remaining <= 0,
   };
+}
+
+export async function getDailyDrawState(): Promise<DailyDrawOverviewResult> {
+  const cloudbase = await getCloudBaseClient();
+  if (!cloudbase.ok) {
+    return {
+      ok: false,
+      code: 'disabled',
+      message: '互动功能暂时没有开启',
+    };
+  }
+  try {
+    const response = await cloudbase.client.app.callFunction({
+      name: 'site-interactions',
+      data: { action: 'getDailyDrawState' },
+      parse: true,
+    });
+    const payload =
+      response.result && typeof response.result === 'object'
+        ? (response.result as Record<string, unknown>)
+        : null;
+    const source =
+      payload?.data && typeof payload.data === 'object'
+        ? (payload.data as Record<string, unknown>)
+        : null;
+    const fortune = parseDailyDrawState(source?.fortune, 'drawFortune');
+    const memoryCard = parseDailyDrawState(
+      source?.memoryCard,
+      'drawMemoryCard',
+    );
+    if (
+      payload?.ok === true &&
+      source &&
+      typeof source.date === 'string' &&
+      fortune &&
+      memoryCard
+    ) {
+      return {
+        ok: true,
+        data: { date: source.date, fortune, memoryCard },
+      };
+    }
+    return {
+      ok: false,
+      code: payload?.code === 'NOT_LOGGED_IN' ? 'signed-out' : 'unavailable',
+      message:
+        typeof payload?.message === 'string' && payload.message.length <= 100
+          ? payload.message
+          : '今天的次数暂时没有连接上',
+    };
+  } catch {
+    return {
+      ok: false,
+      code: 'unavailable',
+      message: '网络有点慢，今天的次数还没有同步好',
+    };
+  }
 }
 
 async function callDailyDraw(
@@ -226,14 +303,7 @@ async function callDailyDraw(
     };
   }
   try {
-    const requestId =
-      mode === 'draw'
-        ? typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-              byte.toString(16).padStart(2, '0'),
-            ).join('')
-        : undefined;
+    const requestId = mode === 'draw' ? createRequestId() : undefined;
     const response = await cloudbase.client.app.callFunction({
       name: 'site-interactions',
       data: { action, mode, ...(requestId ? { requestId } : {}) },
@@ -274,16 +344,27 @@ async function callDailyDraw(
   }
 }
 
-export function getDailyFortuneState(): Promise<DailyDrawResult> {
-  return callDailyDraw('drawFortune', 'get');
+export async function getDailyFortuneState(): Promise<DailyDrawResult> {
+  const overview = await getDailyDrawState();
+  if (overview.ok) return { ok: true, data: overview.data.fortune };
+  // 静态网站与新版云函数分开部署时，短暂兼容旧版单项读取协议。
+  if (overview.code === 'unavailable') {
+    return callDailyDraw('drawFortune', 'get');
+  }
+  return overview;
 }
 
 export function drawDailyFortune(): Promise<DailyDrawResult> {
   return callDailyDraw('drawFortune', 'draw');
 }
 
-export function getDailyMemoryState(): Promise<DailyDrawResult> {
-  return callDailyDraw('drawMemoryCard', 'get');
+export async function getDailyMemoryState(): Promise<DailyDrawResult> {
+  const overview = await getDailyDrawState();
+  if (overview.ok) return { ok: true, data: overview.data.memoryCard };
+  if (overview.code === 'unavailable') {
+    return callDailyDraw('drawMemoryCard', 'get');
+  }
+  return overview;
 }
 
 export function drawDailyMemoryCard(): Promise<DailyDrawResult> {
@@ -370,12 +451,7 @@ export function drawDriftBottle(): Promise<
     limit: number;
   }>
 > {
-  const requestId =
-    typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-          byte.toString(16).padStart(2, '0'),
-        ).join('');
+  const requestId = createRequestId();
   return callFeature('drawBottle', { requestId });
 }
 

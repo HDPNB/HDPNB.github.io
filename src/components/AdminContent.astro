@@ -83,7 +83,7 @@ const cloudBaseEnabled =
     | 'rejected'
     | 'hidden'
     | 'archived';
-  type TargetStatus = 'approved' | 'rejected' | 'hidden';
+  type TargetStatus = 'approved' | 'rejected' | 'hidden' | 'archived';
 
   interface ReviewItem {
     kind: ReviewKind;
@@ -103,7 +103,10 @@ const cloudBaseEnabled =
     data?: unknown;
   }
 
+  const setupAdminContent = () => {
   const root = document.querySelector<HTMLElement>('[data-admin-content]');
+  if (!root || root.dataset.adminContentReady === 'true') return;
+  root.dataset.adminContentReady = 'true';
   const unlock = root?.querySelector<HTMLButtonElement>('[data-admin-unlock]');
   const gateState = root?.querySelector<HTMLElement>('[data-admin-gate-state]');
   const identity = root?.querySelector<HTMLElement>('[data-admin-identity]');
@@ -203,7 +206,14 @@ const cloudBaseEnabled =
         ['hidden', '暂时隐藏'],
       ];
     }
-    if (item.status === 'approved') return [['hidden', '暂时隐藏']];
+    if (item.status === 'approved') {
+      return [
+        ['hidden', '暂时隐藏'],
+        ...(item.kind === 'bottle'
+          ? ([['archived', '手动归档']] as Array<[TargetStatus, string]>)
+          : []),
+      ];
+    }
     return [
       ['approved', '恢复展示'],
       ...(item.status === 'hidden'
@@ -464,4 +474,7 @@ const cloudBaseEnabled =
   window.addEventListener('hdp:auth-changed', handleAuthChange);
   document.addEventListener('astro:before-swap', cleanup, { once: true });
   window.addEventListener('pagehide', cleanup, { once: true });
+  };
+
+  document.addEventListener('astro:page-load', setupAdminContent);
 </script>

@@ -28,7 +28,7 @@ const colors = [
     <span class="eyebrow">VISITOR STARS</span>
     <h1 id="star-wall-title">访客星空墙</h1>
     <p>
-      <span>每颗公开星星只带着一句经过确认的话</span>
+      <span>每颗星星只带着一句通过基础校验的话</span>
       <span>不会展示身份编号或后台信息</span>
     </p>
   </header>
@@ -52,7 +52,7 @@ const colors = [
       <div>
         <span class="eyebrow">LEAVE A STAR</span>
         <h2>升起一颗星星</h2>
-        <p>每天最多一颗，提交后先进入等待区</p>
+        <p>每天最多一颗，升起以后就会出现在这片夜空</p>
       </div>
       <label class="interaction-field">
         <span>一句话</span>
@@ -107,7 +107,10 @@ const colors = [
     phase: number;
   }
 
+  const setupStarWall = () => {
   const root = document.querySelector<HTMLElement>('[data-star-wall]');
+  if (!root || root.dataset.starWallReady === 'true') return;
+  root.dataset.starWallReady = 'true';
   const sky = root?.querySelector<HTMLElement>('[data-star-sky]');
   const canvas = root?.querySelector<HTMLCanvasElement>('[data-star-canvas]');
   const context = canvas?.getContext('2d');
@@ -144,7 +147,7 @@ const colors = [
     cheer: '加油',
   };
   const statusLabels: Record<OwnStar['status'], string> = {
-    pending: '等待公开',
+    pending: '暂未公开',
     approved: '已经公开',
     rejected: '暂未公开',
     hidden: '已隐藏',
@@ -394,10 +397,10 @@ const colors = [
     if (formStatus) {
       formStatus.textContent = randomCopy(
         copy.success,
-        '星星已经升起，确认公开后会被更多人看见',
+        '这颗星已经升上夜空',
       );
     }
-    await loadMine();
+    await Promise.all([loadMine(), loadPublic()]);
   });
 
   retry?.addEventListener('click', loadPublic);
@@ -428,4 +431,7 @@ const colors = [
   resize();
   void loadPublic();
   void loadMine();
+  };
+
+  document.addEventListener('astro:page-load', setupStarWall);
 </script>

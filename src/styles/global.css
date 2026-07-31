@@ -398,6 +398,10 @@ mark { padding: 0 .08em; color: inherit; background: color-mix(in srgb, var(--cr
 .music-player__timeline > div { display: flex; justify-content: space-between; color: var(--muted); font-size: .58rem; line-height: 1.2; }
 .music-player__volume { width: 54px !important; }
 .music-player__status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.music-player__enable { width: 100%; min-height: 32px; margin-top: 7px; padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--green-deep) 28%, var(--line)); border-radius: 999px; color: var(--green-deep); background: color-mix(in srgb, var(--green) 16%, var(--surface-solid)); font: inherit; font-size: .72rem; cursor: pointer; transition: transform .2s ease, background-color .2s ease; }
+.music-player__enable:hover { background: color-mix(in srgb, var(--green) 26%, var(--surface-solid)); }
+.music-player__enable:active { transform: scale(.98); }
+.music-player:not(.is-expanded) .music-player__enable { position: absolute; top: calc(100% + 6px); left: 0; width: 100%; margin: 0; box-shadow: var(--shadow-soft); }
 .music-playlist { max-height: min(64vh, 480px); padding: 0 12px 12px; overflow-y: auto; border-top: 1px solid var(--line); animation: music-playlist-open .28s ease both; }
 @keyframes music-playlist-open { from { opacity: 0; transform: translateY(-6px); } }
 .music-playlist__header { display: flex; justify-content: space-between; padding: 10px 2px 7px; color: var(--muted); font-size: .72rem; }

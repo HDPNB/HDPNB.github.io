@@ -28,7 +28,10 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     </div>
   </section>
   <script>
+    const setupSearch = () => {
     const input = document.querySelector<HTMLInputElement>('[data-search-input]');
+    if (!input || input.dataset.searchReady === 'true') return;
+    input.dataset.searchReady = 'true';
     const button = document.querySelector<HTMLButtonElement>('[data-search-button]');
     const cards = Array.from(document.querySelectorAll<HTMLElement>('.search-results .post-card'));
     const count = document.querySelector<HTMLElement>('.search-count');
@@ -67,5 +70,8 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
     button?.addEventListener('click', search);
     const initial = new URLSearchParams(location.search).get('q');
     if (initial && input) { input.value = initial; search(); }
+    };
+
+    document.addEventListener('astro:page-load', setupSearch);
   </script>
 </BaseLayout>

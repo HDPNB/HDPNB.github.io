@@ -37,7 +37,10 @@ const { categories, tags, defaultSort = 'desc' } = Astro.props;
 </div>
 
 <script>
+  const setupFilterBar = () => {
   const panel = document.querySelector<HTMLElement>('[data-filter-panel]');
+  if (!panel || panel.dataset.filterReady === 'true') return;
+  panel.dataset.filterReady = 'true';
   const grid = panel?.nextElementSibling?.matches('.post-grid') ? panel.nextElementSibling : document.querySelector('.filterable-grid');
   const cards = Array.from(grid?.querySelectorAll<HTMLElement>('.post-card') || []);
   const category = panel?.querySelector<HTMLSelectElement>('[data-category-filter]');
@@ -73,4 +76,7 @@ const { categories, tags, defaultSort = 'desc' } = Astro.props;
   });
   loadMore?.addEventListener('click', () => { visibleLimit += 6; apply(); });
   apply();
+  };
+
+  document.addEventListener('astro:page-load', setupFilterBar);
 </script>

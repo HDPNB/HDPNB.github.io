@@ -6,6 +6,7 @@ import SiteReactions from '@/components/SiteReactions.astro';
 import { siteConfig } from '@/data/site';
 import type { AmbientVariant } from '@/data/ambient';
 import type { SiteReactionPage } from '@/types/site-interactions';
+import { ViewTransitions } from 'astro:transitions';
 import '@/styles/global.css';
 
 interface Props {
@@ -70,6 +71,7 @@ const reactionPage: SiteReactionPage | null =
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     <title>{pageTitle}</title>
+    <ViewTransitions />
     <script is:inline>
       (() => {
         const saved = localStorage.getItem('hdp-theme');
@@ -98,6 +100,11 @@ const reactionPage: SiteReactionPage | null =
       <p></p>
     </dialog>
     <script>
+      let basePageController: AbortController | undefined;
+      const setupBasePage = () => {
+      basePageController?.abort();
+      basePageController = new AbortController();
+      const { signal } = basePageController;
       const header = document.querySelector<HTMLElement>('[data-header]');
       const topButton = document.querySelector<HTMLButtonElement>('.back-top');
       const onScroll = () => {
@@ -105,8 +112,8 @@ const reactionPage: SiteReactionPage | null =
         topButton?.classList.toggle('is-visible', window.scrollY > 500);
       };
       onScroll();
-      addEventListener('scroll', onScroll, { passive: true });
-      topButton?.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+      addEventListener('scroll', onScroll, { passive: true, signal });
+      topButton?.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }), { signal });
 
       const dialog = document.querySelector<HTMLDialogElement>('.lightbox');
       const dialogImage = dialog?.querySelector('img');
@@ -126,7 +133,7 @@ const reactionPage: SiteReactionPage | null =
           ? event.target.closest<HTMLElement>('[data-lightbox]')
           : null;
         if (target) openLightbox(target);
-      });
+      }, { signal });
       document.addEventListener('keydown', (event) => {
         const target = event.target instanceof Element
           ? event.target.closest<HTMLElement>('[data-lightbox]')
@@ -135,16 +142,16 @@ const reactionPage: SiteReactionPage | null =
           event.preventDefault();
           openLightbox(target);
         }
-      });
-      dialog?.querySelector('.lightbox__close')?.addEventListener('click', () => dialog.close());
+      }, { signal });
+      dialog?.querySelector('.lightbox__close')?.addEventListener('click', () => dialog.close(), { signal });
       dialog?.addEventListener('click', (event) => {
         if (event.target === dialog) dialog.close();
-      });
+      }, { signal });
       dialog?.addEventListener('close', () => {
         dialogImage?.removeAttribute('src');
         lightboxTrigger?.focus();
         lightboxTrigger = null;
-      });
+      }, { signal });
 
       document.querySelectorAll('pre').forEach((pre) => {
         if (pre.parentElement?.classList.contains('code-wrap')) return;
@@ -160,9 +167,12 @@ const reactionPage: SiteReactionPage | null =
           await navigator.clipboard.writeText(pre.textContent || '');
           button.textContent = '已复制';
           setTimeout(() => (button.textContent = '复制'), 1500);
-        });
+        }, { signal });
         wrap.appendChild(button);
       });
+      };
+
+      document.addEventListener('astro:page-load', setupBasePage);
     </script>
   </body>
 </html>

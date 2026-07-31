@@ -109,6 +109,7 @@ const homeTitleLines = siteConfig.homeTitle.split('\n');
       pickRandom,
     } from '@/lib/random';
 
+    const setupHomeInteractions = () => {
     const welcomeRandom = entryRandom('home-welcome');
     const welcomeRoot = document.querySelector<HTMLElement>('[data-home-interactions]');
     const welcomeButton = welcomeRoot?.querySelector<HTMLButtonElement>('[data-random-welcome]');
@@ -136,5 +137,8 @@ const homeTitleLines = siteConfig.homeTitle.split('\n');
     };
     updateMood(true);
     moodButton?.addEventListener('click', () => updateMood(false));
+    };
+
+    document.addEventListener('astro:page-load', setupHomeInteractions);
   </script>
 </BaseLayout>

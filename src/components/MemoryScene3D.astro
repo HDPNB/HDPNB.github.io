@@ -129,6 +129,11 @@ import { memoryObjectCopies } from '@/data/copywriting';
     mood: string;
   }
 
+  const setupMemoryScene = () => {
+  const rootCheck = document.querySelector<HTMLElement>('[data-memory-scene]');
+  if (!rootCheck || rootCheck.dataset.memorySceneReady === 'true') return;
+  rootCheck.dataset.memorySceneReady = 'true';
+
   const idleApi = window as unknown as {
     requestIdleCallback?: (
       callback: IdleRequestCallback,
@@ -280,7 +285,7 @@ import { memoryObjectCopies } from '@/data/copywriting';
       cardOpenButton.textContent = dailyCardState?.reachedLimit
         ? '今天的三段记忆已经收好'
         : dailyCardState
-          ? `今日记忆卡 · 还剩 ${dailyCardState.remainingCount} 次`
+          ? `今日记忆卡 · 还剩 ${dailyCardState.remaining} 次`
           : '今日记忆卡';
     }
   };
@@ -307,7 +312,7 @@ import { memoryObjectCopies } from '@/data/copywriting';
     hideMessage();
     completeText.textContent = copy.text;
     if (completeMeta) {
-      completeMeta.textContent = `${copy.subtitle} · ${copy.mood} · ${state.todayCount}/${state.limit}`;
+      completeMeta.textContent = `${copy.subtitle} · ${copy.mood} · ${state.used}/${state.limit}`;
     }
     completeCard.hidden = false;
     requestAnimationFrame(() => completeCard.classList.add('is-visible'));
@@ -965,4 +970,7 @@ import { memoryObjectCopies } from '@/data/copywriting';
     document.addEventListener('astro:before-swap', cleanup, { once: true });
     window.addEventListener('pagehide', cleanup, { once: true });
   }
+  };
+
+  document.addEventListener('astro:page-load', setupMemoryScene);
 </script>

@@ -1,4 +1,5 @@
 export interface MusicTrack {
+  id: string;
   title: string;
   artist?: string;
   cover?: string;
@@ -25,9 +26,10 @@ export interface MusicTrack {
 
 export const musicTracks: MusicTrack[] = [
   {
+    id: 'song-01',
     title: '那天下雨了',
     artist: '周杰伦',
-    src: '/audio/song-01.mp3',
+    src: '/audio/song-01.flac',
     cover: '/images/music/song-01.webp',
     lyric: '下雨了',
   },
@@ -38,6 +40,7 @@ export const musicTracks: MusicTrack[] = [
 // 配置示例，不会自动加入播放列表
 export const musicTrackExamples: MusicTrack[] = [
   {
+    id: 'example-local',
     title: '示例本地歌曲',
     artist: '歌手名',
     src: '/audio/example.mp3',
@@ -45,6 +48,7 @@ export const musicTrackExamples: MusicTrack[] = [
     tags: ['学习', '放松'],
   },
   {
+    id: 'example-qq-music',
     title: '在 QQ 音乐收听',
     artist: '歌手名',
     qqMusicUrl: '',

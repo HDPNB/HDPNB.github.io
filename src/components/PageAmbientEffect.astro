@@ -132,6 +132,11 @@ const ambientCopies = {
     nextAt: number;
   }
 
+  const setupPageAmbientEffect = () => {
+  const ambientCanvas = document.querySelector<HTMLCanvasElement>('[data-page-ambient]');
+  if (!ambientCanvas || ambientCanvas.dataset.ambientReady === 'true') return;
+  ambientCanvas.dataset.ambientReady = 'true';
+
   const MOTION_STORAGE_KEY = 'hdp-motion-effects';
   const COLLECT_STORAGE_PREFIX = 'hdp-sakura-collection';
   const canvas = document.querySelector<HTMLCanvasElement>('[data-page-ambient]');
@@ -1141,4 +1146,7 @@ const ambientCopies = {
     renderWishes(readWishes());
     start();
   }
+  };
+
+  document.addEventListener('astro:page-load', setupPageAmbientEffect);
 </script>

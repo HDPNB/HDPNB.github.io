@@ -36,11 +36,27 @@ export interface DailyDrawState {
   date: string;
   card: DailyDrawCard | null;
   cards: DailyDrawCard[];
+  used: number;
+  remaining: number;
   todayCount: number;
   remainingCount: number;
   limit: number;
   reachedLimit: boolean;
 }
+
+export interface DailyDrawOverview {
+  date: string;
+  fortune: DailyDrawState;
+  memoryCard: DailyDrawState;
+}
+
+export type DailyDrawOverviewResult =
+  | { ok: true; data: DailyDrawOverview }
+  | {
+      ok: false;
+      code: 'disabled' | 'signed-out' | 'rate-limited' | 'unavailable';
+      message: string;
+    };
 
 export type DailyDrawResult =
   | { ok: true; data: DailyDrawState }

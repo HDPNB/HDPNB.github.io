@@ -18,9 +18,12 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
 <script>
   import { entryRandom } from '@/lib/random';
 
+  const setupRandomStory = () => {
   const random = entryRandom('random-story');
 
   document.querySelectorAll<HTMLButtonElement>('[data-random-story]').forEach((button) => {
+    if (button.dataset.randomStoryReady === 'true') return;
+    button.dataset.randomStoryReady = 'true';
     button.addEventListener('click', () => {
       const posts = JSON.parse(button.dataset.posts || '[]') as { title: string; href: string }[];
       const candidates = posts.filter((post) => post.href !== location.pathname);
@@ -29,4 +32,7 @@ const posts = (await getCollection('blog', ({ data }) => !data.draft))
       if (next) location.href = next.href;
     });
   });
+  };
+
+  document.addEventListener('astro:page-load', setupRandomStory);
 </script>

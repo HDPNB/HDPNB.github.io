@@ -75,7 +75,10 @@ const cloudBaseEnabled =
     message?: string;
   }
 
+  const setupAdminIdentityCheck = () => {
   const root = document.querySelector<HTMLElement>('[data-admin-check]');
+  if (!root || root.dataset.adminCheckReady === 'true') return;
+  root.dataset.adminCheckReady = 'true';
   const authState = root?.querySelector<HTMLElement>('[data-admin-auth-state]');
   const nickname = root?.querySelector<HTMLElement>('[data-admin-nickname]');
   const identity = root?.querySelector<HTMLElement>('[data-admin-identity]');
@@ -224,4 +227,7 @@ const cloudBaseEnabled =
   if (root?.dataset.enabled === 'true') {
     void refreshIdentity();
   }
+  };
+
+  document.addEventListener('astro:page-load', setupAdminIdentityCheck);
 </script>

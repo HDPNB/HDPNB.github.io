@@ -6,7 +6,7 @@ const path = Astro.url.pathname;
 const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith(href);
 ---
 
-<header class="site-header" data-header>
+<header class="site-header" data-header transition:persist="global-site-header">
   <div class="nav-shell">
     <a class="brand" href="/" aria-label={`${siteConfig.name}首页`}>
       <span class="brand-mark" aria-hidden="true">H</span>
@@ -103,4 +103,21 @@ const isActive = (href: string) => href === '/' ? path === '/' : path.startsWith
     menuButton.setAttribute('aria-expanded', String(open));
     menuButton.textContent = open ? '收起' : '菜单';
   });
+
+  const refreshNavigationState = () => {
+    const currentPath = window.location.pathname;
+    document.querySelectorAll<HTMLAnchorElement>('.desktop-nav a, .mobile-nav a').forEach((link) => {
+      const href = new URL(link.href, window.location.href).pathname;
+      const active = href === '/' ? currentPath === '/' : currentPath.startsWith(href);
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    });
+    if (mobileNav && menuButton) {
+      mobileNav.hidden = true;
+      menuButton.setAttribute('aria-expanded', 'false');
+      menuButton.textContent = '菜单';
+    }
+  };
+  document.addEventListener('astro:after-swap', refreshNavigationState);
 </script>

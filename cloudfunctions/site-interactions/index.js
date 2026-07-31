@@ -17,6 +17,7 @@ const limitCollection = database.collection('interaction_limits');
 const ALLOWED_ACTIONS = new Set([
   'getReactions',
   'react',
+  'getDailyDrawState',
   'drawFortune',
   'drawMemoryCard',
   'createStar',
@@ -126,10 +127,40 @@ function parseDate(value) {
 }
 
 function firstDocument(value) {
-  if (Array.isArray(value)) {
-    return value[0] && typeof value[0] === 'object' ? value[0] : null;
+  const document = Array.isArray(value)
+    ? value[0] && typeof value[0] === 'object'
+      ? value[0]
+      : null
+    : value && typeof value === 'object'
+      ? value
+      : null;
+  if (!document) return null;
+
+  // 兼容旧版本事务 set({ data: fields }) 产生的单层嵌套文档。
+  // Node SDK 的 transaction.doc().set() 需要直接接收字段对象。
+  const businessKeys = Object.keys(document).filter((key) => key !== '_id');
+  if (
+    businessKeys.length === 1 &&
+    businessKeys[0] === 'data' &&
+    document.data &&
+    typeof document.data === 'object' &&
+    !Array.isArray(document.data)
+  ) {
+    return {
+      ...document.data,
+      ...(typeof document._id === 'string' ? { _id: document._id } : {}),
+    };
   }
-  return value && typeof value === 'object' ? value : null;
+  return document;
+}
+
+function isValidRequestId(value) {
+  return (
+    typeof value === 'string' &&
+    value.length >= 20 &&
+    value.length <= 80 &&
+    /^[A-Za-z0-9_-]+$/u.test(value)
+  );
 }
 
 function validateInput(event) {
@@ -141,13 +172,6 @@ function validateInput(event) {
   }
 
   if (event.action === 'getReactions' || event.action === 'react') {
-    const allowedKeys =
-      event.action === 'react'
-        ? new Set(['action', 'page', 'reaction'])
-        : new Set(['action', 'page']);
-    if (Object.keys(event).some((key) => !allowedKeys.has(key))) {
-      return failure('INVALID_INPUT', '请求参数不符合要求');
-    }
     if (
       typeof event.page !== 'string' ||
       event.page.length < 2 ||
@@ -168,26 +192,16 @@ function validateInput(event) {
   }
 
   if (event.action === 'drawFortune' || event.action === 'drawMemoryCard') {
-    const allowedKeys =
-      event.mode === 'draw'
-        ? new Set(['action', 'mode', 'requestId'])
-        : new Set(['action', 'mode']);
     if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
       (event.mode !== 'get' && event.mode !== 'draw') ||
-      (event.mode === 'draw' &&
-        (typeof event.requestId !== 'string' ||
-          event.requestId.length < 20 ||
-          event.requestId.length > 80 ||
-          !/^[A-Za-z0-9_-]+$/u.test(event.requestId)))
+      (event.mode === 'draw' && !isValidRequestId(event.requestId))
     ) {
       return failure('INVALID_INPUT', '请选择有效的卡片操作');
     }
   }
+  if (event.action === 'getDailyDrawState') return null;
   if (event.action === 'createStar') {
-    const allowedKeys = new Set(['action', 'message', 'mood', 'color']);
     if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
       typeof event.message !== 'string' ||
       typeof event.mood !== 'string' ||
       typeof event.color !== 'string'
@@ -195,15 +209,8 @@ function validateInput(event) {
       return failure('INVALID_INPUT', '请完整填写星星内容');
     }
   }
-  if (event.action === 'getPublicStars' || event.action === 'getMyStars') {
-    if (Object.keys(event).some((key) => key !== 'action')) {
-      return failure('INVALID_INPUT', '请求参数不符合要求');
-    }
-  }
   if (event.action === 'createBottle') {
-    const allowedKeys = new Set(['action', 'content', 'category']);
     if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
       typeof event.content !== 'string' ||
       typeof event.category !== 'string'
     ) {
@@ -211,26 +218,12 @@ function validateInput(event) {
     }
   }
   if (event.action === 'drawBottle') {
-    const allowedKeys = new Set(['action', 'requestId']);
-    if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
-      typeof event.requestId !== 'string' ||
-      event.requestId.length < 20 ||
-      event.requestId.length > 80 ||
-      !/^[A-Za-z0-9_-]+$/u.test(event.requestId)
-    ) {
+    if (!isValidRequestId(event.requestId)) {
       return failure('INVALID_INPUT', '漂流瓶请求参数不符合要求');
     }
   }
-  if (event.action === 'getMyBottles') {
-    if (Object.keys(event).some((key) => key !== 'action')) {
-      return failure('INVALID_INPUT', '请求参数不符合要求');
-    }
-  }
   if (event.action === 'respondBottle') {
-    const allowedKeys = new Set(['action', 'bottleToken', 'response']);
     if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
       typeof event.bottleToken !== 'string' ||
       typeof event.response !== 'string'
     ) {
@@ -238,9 +231,7 @@ function validateInput(event) {
     }
   }
   if (event.action === 'createCapsule') {
-    const allowedKeys = new Set(['action', 'title', 'content', 'unlockAt']);
     if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
       typeof event.title !== 'string' ||
       typeof event.content !== 'string' ||
       typeof event.unlockAt !== 'string'
@@ -248,17 +239,8 @@ function validateInput(event) {
       return failure('INVALID_INPUT', '请完整填写时光胶囊');
     }
   }
-  if (event.action === 'getMyCapsules') {
-    if (Object.keys(event).some((key) => key !== 'action')) {
-      return failure('INVALID_INPUT', '请求参数不符合要求');
-    }
-  }
   if (event.action === 'openCapsule' || event.action === 'deleteCapsule') {
-    const allowedKeys = new Set(['action', 'capsuleToken']);
-    if (
-      Object.keys(event).some((key) => !allowedKeys.has(key)) ||
-      typeof event.capsuleToken !== 'string'
-    ) {
+    if (typeof event.capsuleToken !== 'string') {
       return failure('INVALID_INPUT', '胶囊凭据无效');
     }
   }
@@ -278,6 +260,57 @@ function sanitizePlainText(value, min, max) {
   return text;
 }
 
+function validateAutoPublicText(value, min, max, subject) {
+  const text = sanitizePlainText(value, min, max);
+  if (!text) {
+    return {
+      ok: false,
+      response: failure(
+        'INVALID_CONTENT',
+        `${subject}需要是 ${min}～${max} 个纯文本字符`,
+      ),
+    };
+  }
+  if (/(.)\1{7,}/u.test(text)) {
+    return {
+      ok: false,
+      response: failure('INVALID_CONTENT', '请减少连续重复的字符后再试'),
+    };
+  }
+  if (
+    /(?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+(?:com|cn|net|org|io|top|xyz|site|vip|app))(?:\b|\/)/iu.test(
+      text,
+    )
+  ) {
+    return {
+      ok: false,
+      response: failure('INVALID_CONTENT', '这里暂时不能留下网址或域名'),
+    };
+  }
+  if (
+    /(?:\+?86[-\s]?)?1[3-9]\d{9}/u.test(text) ||
+    /(?:qq|q号|企鹅|微信|wechat|vx|v信)\s*[:：号]?\s*[a-z0-9_-]{5,}/iu.test(
+      text,
+    )
+  ) {
+    return {
+      ok: false,
+      response: failure('INVALID_CONTENT', '这里暂时不能留下联系方式'),
+    };
+  }
+  if (
+    /(?:加群|兼职刷单|博彩|赌博|代刷|返利|贷款|扫码领取|点击链接|广告推广)/u.test(
+      text,
+    )
+  ) {
+    return {
+      ok: false,
+      response: failure('INVALID_CONTENT', '这段内容暂时不适合公开展示'),
+    };
+  }
+  return { ok: true, text };
+}
+
 function normalizeDateForResponse(value) {
   const date = parseDate(value);
   return date ? date.toISOString() : null;
@@ -291,8 +324,9 @@ async function getNickname(uid) {
 }
 
 async function createStar(uid, date, event) {
-  const message = sanitizePlainText(event.message, 1, 30);
-  if (!message) return failure('INVALID_CONTENT', '星星上的话需要是 1～30 个纯文本字符');
+  const validated = validateAutoPublicText(event.message, 1, 30, '星星上的话');
+  if (!validated.ok) return validated.response;
+  const message = validated.text;
   if (!STAR_MOODS.has(event.mood) || !STAR_COLORS.has(event.color)) {
     return failure('INVALID_INPUT', '请选择有效的心情和星星颜色');
   }
@@ -318,29 +352,30 @@ async function createStar(uid, date, event) {
       }
       const now = new Date();
       await transaction.collection('visitor_stars').doc(starId).set({
-        data: {
-          uid,
-          nickname,
-          message,
-          mood: event.mood,
-          color: event.color,
-          status: 'pending',
-          createdAt: now,
-          updatedAt: now,
-          reviewedAt: null,
-          reviewedBy: null,
-        },
+        uid,
+        nickname,
+        message,
+        mood: event.mood,
+        color: event.color,
+        status: 'approved',
+        reportCount: 0,
+        hiddenReason: null,
+        autoHiddenAt: null,
+        approvedAt: now,
+        publishedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        reviewedAt: null,
+        reviewedBy: null,
       });
       await dailyRef.set({
-        data: {
-          uid,
-          date,
-          action: 'createStar',
-          count: 1,
-          results: ['submitted'],
-          createdAt: daily && daily.createdAt ? daily.createdAt : now,
-          updatedAt: now,
-        },
+        uid,
+        date,
+        action: 'createStar',
+        count: 1,
+        results: ['submitted'],
+        createdAt: daily && daily.createdAt ? daily.createdAt : now,
+        updatedAt: now,
       });
       return { date, todayCount: 1, remainingCount: 0, limit: 1 };
     });
@@ -422,8 +457,9 @@ function randomPublicToken() {
 }
 
 async function createBottle(uid, date, event) {
-  const content = sanitizePlainText(event.content, 1, 80);
-  if (!content) return failure('INVALID_CONTENT', '漂流纸条需要是 1～80 个纯文本字符');
+  const validated = validateAutoPublicText(event.content, 1, 80, '漂流纸条');
+  if (!validated.ok) return validated.response;
+  const content = validated.text;
   if (!BOTTLE_CATEGORIES.has(event.category)) {
     return failure('INVALID_INPUT', '请选择有效的纸条分类');
   }
@@ -449,33 +485,31 @@ async function createBottle(uid, date, event) {
       }
       const now = new Date();
       await transaction.collection('drift_bottles').doc(bottleId).set({
-        data: {
-          uid,
-          content,
-          category: event.category,
-          publicToken,
-          status: 'pending',
-          responseCounts: {},
-          deliveryCount: 0,
-          lastDeliveredAt: null,
-          nextAvailableAt: null,
-          archivedAt: null,
-          createdAt: now,
-          updatedAt: now,
-          reviewedAt: null,
-          reviewedBy: null,
-        },
+        uid,
+        content,
+        category: event.category,
+        publicToken,
+        status: 'approved',
+        responseCounts: {},
+        deliveryCount: 0,
+        lastDeliveredAt: null,
+        nextAvailableAt: now,
+        archivedAt: null,
+        approvedAt: now,
+        publishedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        reviewedAt: null,
+        reviewedBy: null,
       });
       await dailyRef.set({
-        data: {
-          uid,
-          date,
-          action: 'createBottle',
-          count: 1,
-          results: ['submitted'],
-          createdAt: daily && daily.createdAt ? daily.createdAt : now,
-          updatedAt: now,
-        },
+        uid,
+        date,
+        action: 'createBottle',
+        count: 1,
+        results: ['submitted'],
+        createdAt: daily && daily.createdAt ? daily.createdAt : now,
+        updatedAt: now,
       });
       return { date, todayCount: 1, remainingCount: 0, limit: 1 };
     });
@@ -746,30 +780,26 @@ async function drawBottle(uid, date, requestId) {
         },
       });
       await dailyRef.set({
-        data: {
-          uid,
-          date,
-          action: 'drawBottle',
-          count: nextIds.length,
-          results: nextIds,
-          requests: nextRequests,
-          createdAt: daily && daily.createdAt ? daily.createdAt : now,
-          updatedAt: now,
-        },
+        uid,
+        date,
+        action: 'drawBottle',
+        count: nextIds.length,
+        results: nextIds,
+        requests: nextRequests,
+        createdAt: daily && daily.createdAt ? daily.createdAt : now,
+        updatedAt: now,
       });
       await recentRef.set({
-        data: {
-          uid,
-          recentBottleIds: [
-            selected._id,
-            ...recentIds.filter((item) => item !== selected._id),
-          ].slice(0, BOTTLE_RECENT_LIMIT),
-          createdAt:
-            recentState && recentState.createdAt
-              ? recentState.createdAt
-              : now,
-          updatedAt: now,
-        },
+        uid,
+        recentBottleIds: [
+          selected._id,
+          ...recentIds.filter((item) => item !== selected._id),
+        ].slice(0, BOTTLE_RECENT_LIMIT),
+        createdAt:
+          recentState && recentState.createdAt
+            ? recentState.createdAt
+            : now,
+        updatedAt: now,
       });
       return {
         bottle: {
@@ -827,12 +857,10 @@ async function respondBottle(uid, event) {
       }
       const now = new Date();
       await responseRef.set({
-        data: {
-          uid,
-          bottleId: bottle._id,
-          response: event.response,
-          createdAt: now,
-        },
+        uid,
+        bottleId: bottle._id,
+        response: event.response,
+        createdAt: now,
       });
     });
   } catch (error) {
@@ -929,24 +957,20 @@ async function createCapsule(uid, event) {
       }
       const createdAt = new Date();
       await transaction.collection('time_capsules').doc(capsuleId).set({
-        data: {
-          uid,
-          capsuleToken,
-          title,
-          content,
-          unlockAt,
-          status: 'active',
-          createdAt,
-          updatedAt: createdAt,
-        },
+        uid,
+        capsuleToken,
+        title,
+        content,
+        unlockAt,
+        status: 'active',
+        createdAt,
+        updatedAt: createdAt,
       });
       await quotaRef.set({
-        data: {
-          uid,
-          activeCapsules: activeCount + 1,
-          updatedAt: createdAt,
-          createdAt: quota && quota.createdAt ? quota.createdAt : createdAt,
-        },
+        uid,
+        activeCapsules: activeCount + 1,
+        updatedAt: createdAt,
+        createdAt: quota && quota.createdAt ? quota.createdAt : createdAt,
       });
       return {
         capsule: {
@@ -1050,12 +1074,10 @@ async function deleteCapsule(uid, token) {
       data: { status: 'deleted', content: '', updatedAt: now, deletedAt: now },
     });
     await quotaRef.set({
-      data: {
-        uid,
-        activeCapsules: Math.max(0, activeCount - 1),
-        createdAt: quota && quota.createdAt ? quota.createdAt : now,
-        updatedAt: now,
-      },
+      uid,
+      activeCapsules: Math.max(0, activeCount - 1),
+      createdAt: quota && quota.createdAt ? quota.createdAt : now,
+      updatedAt: now,
     });
   });
   return success({ deleted: true });
@@ -1196,13 +1218,16 @@ function normalizeDailyRecord(record, uid, action, date) {
 
 function dailyState(action, date, cards, cardIndex = null) {
   const todayCount = Math.min(DAILY_DRAW_LIMIT, cards.length);
+  const remainingCount = Math.max(0, DAILY_DRAW_LIMIT - todayCount);
   return {
     action,
     date,
     card: Number.isInteger(cardIndex) ? { index: cardIndex } : null,
     cards: cards.map((index) => ({ index })),
+    used: todayCount,
+    remaining: remainingCount,
     todayCount,
-    remainingCount: Math.max(0, DAILY_DRAW_LIMIT - todayCount),
+    remainingCount,
     limit: DAILY_DRAW_LIMIT,
     reachedLimit: todayCount >= DAILY_DRAW_LIMIT,
   };
@@ -1231,6 +1256,18 @@ async function getDailyDrawState(uid, action, date) {
     date,
   );
   return success(dailyState(action, date, normalized.cards));
+}
+
+async function getCombinedDailyDrawState(uid, date) {
+  const [fortune, memoryCard] = await Promise.all([
+    getDailyDrawState(uid, 'drawFortune', date),
+    getDailyDrawState(uid, 'drawMemoryCard', date),
+  ]);
+  return success({
+    date,
+    fortune: fortune.data,
+    memoryCard: memoryCard.data,
+  });
 }
 
 async function drawDailyCard(uid, action, date, requestId) {
@@ -1277,17 +1314,15 @@ async function drawDailyCard(uid, action, date, requestId) {
         ];
         const now = new Date();
         await reference.set({
-          data: {
-            uid,
-            date,
-            action,
-            count: nextCards.length,
-            results: nextCards,
-            requests: nextRequests,
-            createdAt:
-              existing && existing.createdAt ? existing.createdAt : now,
-            updatedAt: now,
-          },
+          uid,
+          date,
+          action,
+          count: nextCards.length,
+          results: nextCards,
+          requests: nextRequests,
+          createdAt:
+            existing && existing.createdAt ? existing.createdAt : now,
+          updatedAt: now,
         });
         return dailyState(action, date, nextCards, nextIndex);
       },
@@ -1318,6 +1353,9 @@ exports.main = async (event, context) => {
   try {
     if (event.action === 'getPublicStars') {
       return await getPublicStars();
+    }
+    if (event.action === 'getDailyDrawState') {
+      return await getCombinedDailyDrawState(uid, date);
     }
     if (event.action === 'createStar') {
       return await createStar(uid, date, event);

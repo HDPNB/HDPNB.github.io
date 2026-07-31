@@ -35,7 +35,10 @@ const enabled =
   import { entryRandom } from '@/lib/random';
   import type { GuestbookEncounterMessage } from '@/types/guestbook';
 
+  const setupGuestbookEncounter = () => {
   const root = document.querySelector<HTMLElement>('[data-guestbook-encounter]');
+  if (!root || root.dataset.encounterReady === 'true') return;
+  root.dataset.encounterReady = 'true';
   const button = root?.querySelector<HTMLButtonElement>('[data-encounter-button]');
   const card = root?.querySelector<HTMLElement>('[data-encounter-card]');
   const content = root?.querySelector<HTMLElement>('[data-encounter-content]');
@@ -105,4 +108,7 @@ const enabled =
       button.disabled = false;
     }
   });
+  };
+
+  document.addEventListener('astro:page-load', setupGuestbookEncounter);
 </script>

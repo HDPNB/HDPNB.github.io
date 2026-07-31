@@ -27,7 +27,7 @@ const responses = [
     <span class="eyebrow">A BOTTLE ON THE WATER</span>
     <h1 id="drift-bottle-title">漂流瓶</h1>
     <p>
-      <span>纸条会先进入等待区，确认适合公开后才开始漂流</span>
+      <span>写下以后，纸条会经过基础校验，再自动进入漂流池</span>
       <span>捞取时不会遇到自己的瓶子，也不会展示任何身份信息</span>
     </p>
   </header>
@@ -59,7 +59,7 @@ const responses = [
       <div>
         <span class="eyebrow">SEND A NOTE</span>
         <h2>投下一张纸条</h2>
-        <p>每天最多投递一只，确认适合公开后才会进入漂流池</p>
+        <p>每天最多投递一只，合上瓶塞以后就让它慢慢出发</p>
       </div>
       <label class="interaction-field">
         <span>纸条内容</span>
@@ -102,7 +102,10 @@ const responses = [
     OwnBottle,
   } from '@/types/site-interactions';
 
+  const setupDriftBottle = () => {
   const root = document.querySelector<HTMLElement>('[data-drift-bottle]');
+  if (!root || root.dataset.driftBottleReady === 'true') return;
+  root.dataset.driftBottleReady = 'true';
   const water = root?.querySelector<HTMLElement>('[data-bottle-water]');
   const draw = root?.querySelector<HTMLButtonElement>('[data-bottle-draw]');
   const drawLabel = draw?.querySelector<HTMLElement>('strong');
@@ -124,7 +127,7 @@ const responses = [
     'good-news': '最近的好消息',
   };
   const statusLabels: Record<OwnBottle['status'], string> = {
-    pending: '等待公开',
+    pending: '暂未公开',
     approved: '已经公开',
     rejected: '暂未公开',
     hidden: '已隐藏',
@@ -233,7 +236,9 @@ const responses = [
     }
     input.value = '';
     if (count) count.textContent = '0';
-    if (formStatus) formStatus.textContent = message('create', '纸条已经折好，正在等待公开');
+    if (formStatus) {
+      formStatus.textContent = message('create', '瓶塞已经合上，它正慢慢漂向远处');
+    }
     await loadMine();
   });
 
@@ -281,4 +286,7 @@ const responses = [
   document.addEventListener('astro:before-swap', cleanup, { once: true });
   window.addEventListener('pagehide', cleanup, { once: true });
   void loadMine();
+  };
+
+  document.addEventListener('astro:page-load', setupDriftBottle);
 </script>

@@ -10,6 +10,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
 
 <section
   class:list={['music-player', { 'music-player--empty': !hasTracks }]}
+  transition:persist="global-music-player"
   data-music-player
   data-tracks={JSON.stringify(musicTracks)}
   data-empty-copies={JSON.stringify(musicEmptyCopies)}
@@ -79,6 +80,9 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       <p class="music-player__status" data-music-status aria-live="polite">
         {hasTracks ? '点击播放，声音才会开始' : '播放列表暂时是空的'}
       </p>
+      <button class="music-player__enable" type="button" data-music-enable hidden>
+        点击开启这个空间的音乐
+      </button>
     </div>
   </div>
 
@@ -145,6 +149,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
   import { entryRandom, pickRandom } from '@/lib/random';
 
   type Track = {
+    id: string;
     title: string;
     artist?: string;
     cover?: string;
@@ -156,6 +161,14 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
   type PlayMode = 'list' | 'single' | 'shuffle' | 'sequential';
   type ListScope = 'all' | 'recent' | 'favorites';
   type SavedState = {
+    currentTrackIndex?: number;
+    currentTrackKey?: string;
+    currentTime?: number;
+    playMode?: PlayMode;
+    userEnabledMusic?: boolean;
+    wasPlaying?: boolean;
+    muted?: boolean;
+    // 旧版缓存字段，读取后会自动迁移到上面的新字段。
     index?: number;
     src?: string;
     progress?: number;
@@ -171,7 +184,8 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
   const tracks = JSON.parse(player?.dataset.tracks || '[]') as Track[];
   const emptyCopies = JSON.parse(player?.dataset.emptyCopies || '[]') as string[];
 
-  if (player && audio) {
+  if (player && audio && player.dataset.musicInitialized !== 'true') {
+    player.dataset.musicInitialized = 'true';
     const title = player.querySelector<HTMLElement>('[data-music-title]');
     const artist = player.querySelector<HTMLElement>('[data-music-artist]');
     const cover = player.querySelector<HTMLImageElement>('[data-music-cover]');
@@ -194,6 +208,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
     const surpriseButton = player.querySelector<HTMLButtonElement>('[data-music-surprise]');
     const qqLink = player.querySelector<HTMLAnchorElement>('[data-music-qq]');
     const status = player.querySelector<HTMLElement>('[data-music-status]');
+    const enableButton = player.querySelector<HTMLButtonElement>('[data-music-enable]');
     const emptyCopy = player.querySelector<HTMLElement>('[data-music-empty-copy]');
     const storageKey = 'hdp-music-player';
     const playerRandom = entryRandom('music-player');
@@ -215,21 +230,33 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
 
     const saved = readState();
     const trackKey = (track: Track) =>
-      track.src || track.qqMusicUrl || `${track.title}:${track.artist || ''}`;
-    const savedIndex = saved.src
-      ? tracks.findIndex((track) => trackKey(track) === saved.src || track.src === saved.src)
+      track.id || track.src || track.qqMusicUrl || `${track.title}:${track.artist || ''}`;
+    const savedTrackKey = saved.currentTrackKey || saved.src;
+    const savedIndex = savedTrackKey
+      ? tracks.findIndex((track) => trackKey(track) === savedTrackKey || track.src === savedTrackKey)
       : -1;
     let index = savedIndex >= 0
       ? savedIndex
-      : Math.min(Math.max(saved.index || 0, 0), Math.max(tracks.length - 1, 0));
-    let pendingTime = Math.max(saved.progress || 0, 0);
+      : Math.min(
+          Math.max(saved.currentTrackIndex ?? saved.index ?? 0, 0),
+          Math.max(tracks.length - 1, 0),
+        );
+    let pendingTime = Math.max(saved.currentTime ?? saved.progress ?? 0, 0);
     let lastVolume = typeof saved.volume === 'number' ? Math.min(Math.max(saved.volume, 0), 1) : 0.7;
-    let playMode: PlayMode = saved.mode && modes.includes(saved.mode) ? saved.mode : 'list';
+    const savedMode = saved.playMode || saved.mode;
+    let playMode: PlayMode = savedMode && modes.includes(savedMode) ? savedMode : 'list';
     let recent = (saved.recent || []).filter((key) => tracks.some((track) => trackKey(track) === key)).slice(0, 10);
     let favorites = new Set((saved.favorites || []).filter((key) => tracks.some((track) => trackKey(track) === key)));
     let activeTag = '';
     let scope: ListScope = 'all';
     let lastProgressSave = 0;
+    let userEnabledMusic = saved.userEnabledMusic === true;
+    let wasPlaying = saved.wasPlaying === true;
+    let autoplayAttempted = false;
+    let autoplayBlocked = false;
+    let suppressPauseState = false;
+    let handlingTrackError = false;
+    const failedTracks = new Set<string>();
 
     const formatTime = (seconds: number) => {
       if (!Number.isFinite(seconds)) return '0:00';
@@ -241,16 +268,25 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
 
     const saveState = () => {
       const currentTrack = tracks[index];
-      localStorage.setItem(storageKey, JSON.stringify({
-        index,
-        src: currentTrack ? trackKey(currentTrack) : undefined,
-        progress: pendingTime > 0 ? pendingTime : (Number.isFinite(audio.currentTime) ? audio.currentTime : 0),
-        volume: audio.volume,
-        expanded: !playlist?.hidden,
-        mode: playMode,
-        recent,
-        favorites: [...favorites],
-      }));
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({
+          currentTrackIndex: index,
+          currentTrackKey: currentTrack ? trackKey(currentTrack) : undefined,
+          currentTime: pendingTime > 0
+            ? pendingTime
+            : (Number.isFinite(audio.currentTime) ? audio.currentTime : 0),
+          volume: audio.volume,
+          muted: audio.muted,
+          expanded: !playlist?.hidden,
+          playMode,
+          userEnabledMusic,
+          wasPlaying,
+          recent,
+          favorites: [...favorites],
+        }));
+      } catch {
+        // 音乐仍可继续播放，只是不保存当前设备偏好。
+      }
     };
 
     const getVisibleIndices = () => {
@@ -266,6 +302,11 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
         const matchesSearch = !query || normalize(`${track.title} ${track.artist || ''}`).includes(query);
         return matchesScope && matchesTag && matchesSearch;
       });
+    };
+
+    const isPlayableIndex = (trackIndex: number) => {
+      const track = tracks[trackIndex];
+      return Boolean(track?.src) && !failedTracks.has(trackKey(track));
     };
 
     const updateModeButton = () => {
@@ -344,11 +385,38 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       player.classList.toggle('is-playing', playing);
     };
 
+    const removeGestureFallback = () => {
+      document.removeEventListener('pointerdown', handleFirstGesture, true);
+      document.removeEventListener('keydown', handleFirstGesture, true);
+    };
+
+    const hideEnablePrompt = () => {
+      autoplayBlocked = false;
+      if (enableButton) enableButton.hidden = true;
+      removeGestureFallback();
+    };
+
+    const showEnablePrompt = () => {
+      autoplayBlocked = true;
+      if (enableButton) enableButton.hidden = false;
+      removeGestureFallback();
+      document.addEventListener('pointerdown', handleFirstGesture, {
+        capture: true,
+        once: true,
+      });
+      document.addEventListener('keydown', handleFirstGesture, {
+        capture: true,
+        once: true,
+      });
+    };
+
     const updateTrack = (nextIndex: number, keepSavedTime = false) => {
       if (!tracks[nextIndex]) return;
       index = nextIndex;
       const track = tracks[index];
+      suppressPauseState = true;
       audio.pause();
+      suppressPauseState = false;
       if (track.src) {
         audio.src = track.src;
         audio.load();
@@ -375,7 +443,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       if (!keepSavedTime) pendingTime = 0;
       if (status) {
         status.textContent = playable
-          ? `已选择《${track.title}》，点击播放后才会发出声音`
+          ? `已选择《${track.title}》`
           : track.qqMusicUrl
             ? '这首歌需要在 QQ 音乐打开'
             : '这首歌暂时没有可播放的本地音频';
@@ -384,22 +452,44 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       saveState();
     };
 
-    const playAudio = async () => {
-      if (tracks.length === 0) return;
+    const playAudio = async (userInitiated = false): Promise<boolean> => {
+      if (tracks.length === 0) return false;
       if (!tracks[index]?.src) {
         if (status) status.textContent = tracks[index]?.qqMusicUrl
           ? '请使用“在 QQ 音乐打开”前往收听'
           : '这首歌暂时没有可播放的本地音频';
-        return;
+        return false;
       }
       try {
         await audio.play();
+        userEnabledMusic = userEnabledMusic || userInitiated || autoplayAttempted;
+        wasPlaying = true;
+        hideEnablePrompt();
         if (status) status.textContent = `正在播放《${tracks[index].title}》`;
-      } catch {
-        if (status) status.textContent = '这首歌暂时没有加载成功，可以换一首试试';
+        saveState();
+        updatePlayState();
+        return true;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'NotAllowedError') {
+          showEnablePrompt();
+          if (status) status.textContent = '浏览器暂时没有播放声音，点击后就可以开启';
+        } else if (status) {
+          status.textContent = '这首歌暂时没有加载成功，可以换一首试试';
+        }
+        updatePlayState();
+        return false;
       }
-      updatePlayState();
     };
+
+    function handleFirstGesture(event: Event) {
+      if (!autoplayBlocked || audio?.paused !== true) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-music-player]')) {
+        return;
+      }
+      removeGestureFallback();
+      void playAudio(true);
+    }
 
     const switchTrack = async (nextIndex: number, autoplay = true) => {
       updateTrack(nextIndex);
@@ -413,7 +503,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
     };
 
     const advance = async (fromEnded: boolean) => {
-      const pool = getVisibleIndices().filter((trackIndex) => Boolean(tracks[trackIndex].src));
+      const pool = getVisibleIndices().filter(isPlayableIndex);
       if (pool.length === 0) {
         audio.pause();
         if (status) status.textContent = '当前筛选里没有可以继续播放的歌曲。';
@@ -445,7 +535,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
     };
 
     const previous = async () => {
-      const pool = getVisibleIndices().filter((trackIndex) => Boolean(tracks[trackIndex].src));
+      const pool = getVisibleIndices().filter(isPlayableIndex);
       if (pool.length === 0) return;
       if (playMode === 'shuffle') {
         await switchTrack(randomIndex(pool));
@@ -476,7 +566,12 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
     };
 
     audio.volume = lastVolume;
-    if (volume) volume.value = String(lastVolume);
+    audio.muted = saved.muted === true;
+    if (volume) volume.value = String(audio.muted ? 0 : lastVolume);
+    if (muteButton) {
+      muteButton.textContent = audio.muted ? '静' : '音';
+      muteButton.setAttribute('aria-label', audio.muted ? '取消静音' : '静音');
+    }
     updateModeButton();
     renderList();
     if (emptyCopy && emptyCopies.length > 0) {
@@ -494,25 +589,47 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
     }
 
     playButton?.addEventListener('click', async () => {
-      if (audio.paused) await playAudio();
+      if (audio.paused) await playAudio(true);
       else {
+        wasPlaying = false;
         audio.pause();
         if (status) status.textContent = '已暂停，进度会保存在这台设备上。';
+        saveState();
       }
       updatePlayState();
+    });
+    enableButton?.addEventListener('click', () => {
+      void playAudio(true);
     });
     previousButton?.addEventListener('click', previous);
     nextButton?.addEventListener('click', () => advance(false));
     audio.addEventListener('ended', () => advance(true));
     audio.addEventListener('play', () => {
+      wasPlaying = true;
+      hideEnablePrompt();
       recordRecent();
       updatePlayState();
     });
-    audio.addEventListener('pause', updatePlayState);
-    audio.addEventListener('error', () => {
+    audio.addEventListener('pause', () => {
+      if (!suppressPauseState) wasPlaying = false;
+      updatePlayState();
+      saveState();
+    });
+    audio.addEventListener('error', async () => {
+      const failedTrack = tracks[index];
+      if (!failedTrack?.src || handlingTrackError) return;
+      const failedKey = trackKey(failedTrack);
+      if (failedTracks.has(failedKey)) return;
+      failedTracks.add(failedKey);
+      const shouldContinue = wasPlaying;
+      handlingTrackError = true;
       audio.pause();
       updatePlayState();
       if (status) status.textContent = '这首歌暂时没有加载成功，可以换一首试试';
+      if (shouldContinue && getVisibleIndices().some(isPlayableIndex)) {
+        await advance(false);
+      }
+      handlingTrackError = false;
     });
 
     audio.addEventListener('loadedmetadata', () => {
@@ -526,7 +643,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
     audio.addEventListener('timeupdate', () => {
       if (currentTime) currentTime.textContent = formatTime(audio.currentTime);
       if (progress && document.activeElement !== progress) progress.value = String(audio.currentTime);
-      if (Date.now() - lastProgressSave > 2000) {
+      if (Date.now() - lastProgressSave > 5000) {
         saveState();
         lastProgressSave = Date.now();
       }
@@ -580,7 +697,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       if (status) status.textContent = `已切换为${modeLabels[playMode]}。`;
     });
     surpriseButton?.addEventListener('click', async () => {
-      const pool = getVisibleIndices().filter((trackIndex) => Boolean(tracks[trackIndex].src));
+      const pool = getVisibleIndices().filter(isPlayableIndex);
       if (pool.length === 0) {
         if (status) status.textContent = '当前筛选里没有可以播放的歌曲。';
         return;
@@ -608,7 +725,25 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       }
     });
 
-    addEventListener('pagehide', saveState);
+    cover?.addEventListener('error', () => {
+      if (cover.dataset.fallbackApplied === 'true') return;
+      cover.dataset.fallbackApplied = 'true';
+      cover.src = '/images/life/my_day.webp';
+    });
+
+    const saveBeforeSwap = () => saveState();
+    addEventListener('pagehide', () => {
+      saveState();
+      removeGestureFallback();
+    });
+    document.addEventListener('astro:before-swap', saveBeforeSwap);
     updatePlayState();
+
+    const shouldAttemptAutoplay =
+      saved.userEnabledMusic !== true || saved.wasPlaying === true;
+    if (shouldAttemptAutoplay && tracks[index]?.src && !autoplayAttempted) {
+      autoplayAttempted = true;
+      queueMicrotask(() => void playAudio(false));
+    }
   }
 </script>
