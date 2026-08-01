@@ -52,6 +52,23 @@ const reactionPage: SiteReactionPage | null =
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script is:inline>
+      (() => {
+        const githubHost = 'hdpnb.github.io';
+        const cloudBaseOrigin =
+          'https://hdp-personal-space-d2c2h3f4d04e3-1459909802.tcloudbaseapp.com';
+
+        if (window.location.hostname.toLowerCase() === githubHost) {
+          const target =
+            cloudBaseOrigin +
+            window.location.pathname +
+            window.location.search +
+            window.location.hash;
+
+          window.location.replace(target);
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex,nofollow" />}

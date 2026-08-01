@@ -1,15 +1,11 @@
 ---
 import { dailyFortunes } from '@/data/interactions';
-import {
-  fortuneExchangeCopies,
-} from '@/data/copywriting';
 ---
 
 <section
   class="daily-fortune reveal"
   data-daily-fortune
   data-fortunes={JSON.stringify(dailyFortunes)}
-  data-exchanges={JSON.stringify(fortuneExchangeCopies)}
   aria-labelledby="daily-fortune-title"
 >
   <div>
@@ -25,9 +21,6 @@ import {
     <button class="button button--primary" type="button" data-fortune-draw disabled>
       正在确认今天的次数…
     </button>
-    <button class="text-link" type="button" data-fortune-change hidden>
-      换一句随缘的话
-    </button>
   </div>
   <p class="daily-fortune__status" data-fortune-status aria-live="polite">
     登录游客身份后，次数会由云端按北京时间记录
@@ -39,7 +32,6 @@ import {
     drawDailyFortune,
     getDailyFortuneState,
   } from '@/lib/site-interactions';
-  import { entryRandom, pickRandom } from '@/lib/random';
   import type { DailyDrawState } from '@/types/site-interactions';
 
   interface Fortune {
@@ -52,15 +44,11 @@ import {
   if (!root || root.dataset.dailyFortuneReady === 'true') return;
   root.dataset.dailyFortuneReady = 'true';
   const draw = root?.querySelector<HTMLButtonElement>('[data-fortune-draw]');
-  const change = root?.querySelector<HTMLButtonElement>('[data-fortune-change]');
   const card = root?.querySelector<HTMLElement>('[data-fortune-card]');
   const kind = root?.querySelector<HTMLElement>('[data-fortune-kind]');
   const text = root?.querySelector<HTMLElement>('[data-fortune-text]');
   const status = root?.querySelector<HTMLElement>('[data-fortune-status]');
   const fortunes = JSON.parse(root?.dataset.fortunes || '[]') as Fortune[];
-  const exchanges = JSON.parse(root?.dataset.exchanges || '[]') as string[];
-  const interactionRandom = entryRandom('fortune-exchange');
-  let lastExchangeIndex = -1;
   let busy = false;
   let currentState: DailyDrawState | null = null;
 
@@ -75,13 +63,12 @@ import {
 
   const showCard = (index: number) => {
     const fortune = fortuneAt(index);
-    if (!fortune || !card || !kind || !text || !change) return;
+    if (!fortune || !card || !kind || !text) return;
     card.classList.remove('is-visible');
     requestAnimationFrame(() => {
       kind.textContent = fortune.type;
       text.textContent = fortune.text;
       card.hidden = false;
-      change.hidden = false;
       requestAnimationFrame(() => card.classList.add('is-visible'));
     });
   };
@@ -133,18 +120,6 @@ import {
     if (result.data) renderState(result.data);
     else if (draw) draw.disabled = false;
     setStatus(result.message, true);
-  });
-
-  change?.addEventListener('click', () => {
-    if (!card || !kind || !text || exchanges.length === 0) return;
-    const picked = pickRandom(exchanges, interactionRandom, lastExchangeIndex);
-    lastExchangeIndex = picked.index;
-    card.classList.remove('is-visible');
-    requestAnimationFrame(() => {
-      kind.textContent = '随缘一句';
-      text.textContent = picked.value || '';
-      requestAnimationFrame(() => card.classList.add('is-visible'));
-    });
   });
 
   const handleAuthChange = () => void initialize();
