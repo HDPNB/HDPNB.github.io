@@ -16,10 +16,10 @@ interface Props {
 const { post, headings, previous, next } = Astro.props;
 const { title, description, pubDate, updatedDate, category, tags, cover } = post.data;
 const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
-const lifeCategories = ['校园生活', '随手记录', '旅行与摄影'];
+const lifeCategories = ['校园生活', '随手记录', '旅行与摄影', '随笔', '娱乐'];
 const ambient = lifeCategories.includes(category)
   ? 'life'
-  : category === '项目进展'
+  : category === '项目进展' || category === '项目记录'
     ? 'projects'
     : 'learn';
 ---
@@ -41,7 +41,7 @@ const ambient = lifeCategories.includes(category)
     </header>
     {cover && (
       <figure class="article-cover">
-        <img src={cover} alt={`${title}的封面图`} width="1400" height="900" />
+        <img src={cover} alt={`${title}的封面图`} decoding="async" width="1400" height="900" />
       </figure>
     )}
     <div class="article-shell">

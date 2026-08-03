@@ -45,9 +45,12 @@ const ALLOWED_REACTIONS = ['healing', 'curious', 'cheer', 'miss'];
 const ALLOWED_REACTION_SET = new Set(ALLOWED_REACTIONS);
 const REACTION_COOLDOWN_MS = 3_000;
 const DAILY_DRAW_LIMIT = 3;
+const DAILY_STAR_CREATE_LIMIT = 3;
+const DAILY_BOTTLE_CREATE_LIMIT = 5;
+const DAILY_BOTTLE_DRAW_LIMIT = 3;
 const DAILY_POOL_SIZES = Object.freeze({
-  drawFortune: 60,
-  drawMemoryCard: 60,
+  drawFortune: 300,
+  drawMemoryCard: 240,
 });
 const STAR_MOODS = new Set(['healing', 'miss', 'happy', 'calm', 'hope', 'cheer']);
 const STAR_COLORS = new Set(['sage', 'gold', 'blue', 'rose', 'cream']);
@@ -112,6 +115,53 @@ function hashDocumentId(...parts) {
     .createHash('sha256')
     .update(parts.join('\n'), 'utf8')
     .digest('hex');
+}
+
+function normalizeSubmissionRecord(record, uid, action, date) {
+  if (
+    !record ||
+    record.uid !== uid ||
+    record.action !== action ||
+    record.date !== date
+  ) {
+    return { count: 0, results: [] };
+  }
+  const results = Array.isArray(record.results)
+    ? record.results.filter(
+        (item) => typeof item === 'string' && item.length > 0,
+      )
+    : [];
+  const storedCount =
+    Number.isInteger(record.count) && record.count >= 0 ? record.count : 0;
+  return {
+    count: Math.max(storedCount, results.length),
+    results,
+  };
+}
+
+function submissionState(date, count, limit) {
+  const todayCount = Math.min(
+    limit,
+    Number.isInteger(count) && count >= 0 ? count : 0,
+  );
+  return {
+    date,
+    todayCount,
+    remainingCount: Math.max(0, limit - todayCount),
+    limit,
+  };
+}
+
+async function getSubmissionState(uid, action, date, limit) {
+  const dailyId = hashDocumentId(uid, action, date);
+  const dailyResult = await dailyCollection.doc(dailyId).get();
+  const normalized = normalizeSubmissionRecord(
+    firstDocument(dailyResult.data),
+    uid,
+    action,
+    date,
+  );
+  return submissionState(date, normalized.count, limit);
 }
 
 function parseDate(value) {
@@ -332,24 +382,26 @@ async function createStar(uid, date, event) {
   }
   const nickname = await getNickname(uid);
   const dailyId = hashDocumentId(uid, 'createStar', date);
-  const starId = hashDocumentId(uid, 'visitorStar', date);
   try {
     const transactionResult = await database.runTransaction(async (transaction) => {
       const dailyRef = transaction.collection('daily_interactions').doc(dailyId);
       const dailyResult = await dailyRef.get();
       const daily = firstDocument(dailyResult.data);
-      if (
-        daily &&
-        daily.uid === uid &&
-        daily.date === date &&
-        daily.action === 'createStar' &&
-        Number(daily.count) >= 1
-      ) {
+      const normalized = normalizeSubmissionRecord(daily, uid, 'createStar', date);
+      const currentCount = normalized.count;
+      if (currentCount >= DAILY_STAR_CREATE_LIMIT) {
         throw new InteractionError(
           'LIMIT_REACHED',
-          '今天已经留下了一颗星星，明天再来看看',
+          '今天已经留下三颗星星，明天再来看看',
         );
       }
+      const nextCount = currentCount + 1;
+      const starId = hashDocumentId(
+        uid,
+        'visitorStar',
+        date,
+        String(nextCount),
+      );
       const now = new Date();
       await transaction.collection('visitor_stars').doc(starId).set({
         uid,
@@ -372,12 +424,15 @@ async function createStar(uid, date, event) {
         uid,
         date,
         action: 'createStar',
-        count: 1,
-        results: ['submitted'],
+        count: nextCount,
+        todayCount: nextCount,
+        remainingCount: Math.max(0, DAILY_STAR_CREATE_LIMIT - nextCount),
+        limit: DAILY_STAR_CREATE_LIMIT,
+        results: [...normalized.results, starId],
         createdAt: daily && daily.createdAt ? daily.createdAt : now,
         updatedAt: now,
       });
-      return { date, todayCount: 1, remainingCount: 0, limit: 1 };
+      return submissionState(date, nextCount, DAILY_STAR_CREATE_LIMIT);
     });
     return success(
       transactionResult && transactionResult.result
@@ -421,12 +476,11 @@ async function getPublicStars() {
   return success({ stars });
 }
 
-async function getMyStars(uid) {
-  const result = await starCollection
-    .where({ uid })
-    .orderBy('createdAt', 'desc')
-    .limit(20)
-    .get();
+async function getMyStars(uid, date) {
+  const [result, quota] = await Promise.all([
+    starCollection.where({ uid }).orderBy('createdAt', 'desc').limit(20).get(),
+    getSubmissionState(uid, 'createStar', date, DAILY_STAR_CREATE_LIMIT),
+  ]);
   const stars = (Array.isArray(result.data) ? result.data : [])
     .map((record) => {
       const message = sanitizePlainText(record.message, 1, 30);
@@ -449,7 +503,7 @@ async function getMyStars(uid) {
       };
     })
     .filter(Boolean);
-  return success({ stars });
+  return success({ stars, ...quota });
 }
 
 function randomPublicToken() {
@@ -464,25 +518,27 @@ async function createBottle(uid, date, event) {
     return failure('INVALID_INPUT', '请选择有效的纸条分类');
   }
   const dailyId = hashDocumentId(uid, 'createBottle', date);
-  const bottleId = hashDocumentId(uid, 'driftBottle', date);
   const publicToken = randomPublicToken();
   try {
     const transactionResult = await database.runTransaction(async (transaction) => {
       const dailyRef = transaction.collection('daily_interactions').doc(dailyId);
       const dailyResult = await dailyRef.get();
       const daily = firstDocument(dailyResult.data);
-      if (
-        daily &&
-        daily.uid === uid &&
-        daily.date === date &&
-        daily.action === 'createBottle' &&
-        Number(daily.count) >= 1
-      ) {
+      const normalized = normalizeSubmissionRecord(daily, uid, 'createBottle', date);
+      const currentCount = normalized.count;
+      if (currentCount >= DAILY_BOTTLE_CREATE_LIMIT) {
         throw new InteractionError(
           'LIMIT_REACHED',
-          '今天已经投递过一只漂流瓶，明天再来吧',
+          '今天已经投递五只漂流瓶，明天再来吧',
         );
       }
+      const nextCount = currentCount + 1;
+      const bottleId = hashDocumentId(
+        uid,
+        'driftBottle',
+        date,
+        String(nextCount),
+      );
       const now = new Date();
       await transaction.collection('drift_bottles').doc(bottleId).set({
         uid,
@@ -506,12 +562,15 @@ async function createBottle(uid, date, event) {
         uid,
         date,
         action: 'createBottle',
-        count: 1,
-        results: ['submitted'],
+        count: nextCount,
+        todayCount: nextCount,
+        remainingCount: Math.max(0, DAILY_BOTTLE_CREATE_LIMIT - nextCount),
+        limit: DAILY_BOTTLE_CREATE_LIMIT,
+        results: [...normalized.results, bottleId],
         createdAt: daily && daily.createdAt ? daily.createdAt : now,
         updatedAt: now,
       });
-      return { date, todayCount: 1, remainingCount: 0, limit: 1 };
+      return submissionState(date, nextCount, DAILY_BOTTLE_CREATE_LIMIT);
     });
     return success(
       transactionResult && transactionResult.result
@@ -643,7 +702,7 @@ function normalizeBottleRequests(daily, uid, date) {
         typeof item.id === 'string' &&
         typeof item.bottleId === 'string',
     )
-    .slice(0, 3);
+    .slice(0, DAILY_BOTTLE_DRAW_LIMIT);
 }
 
 async function drawBottle(uid, date, requestId) {
@@ -663,7 +722,9 @@ async function drawBottle(uid, date, requestId) {
         daily.date === date &&
         daily.action === 'drawBottle' &&
         Array.isArray(daily.results)
-          ? daily.results.filter((item) => typeof item === 'string').slice(0, 3)
+          ? daily.results
+              .filter((item) => typeof item === 'string')
+              .slice(0, DAILY_BOTTLE_DRAW_LIMIT)
           : [];
       const repeated = requests.find((item) => item.id === requestId);
       if (repeated) {
@@ -685,8 +746,11 @@ async function drawBottle(uid, date, requestId) {
             },
             date,
             todayCount: drawnIds.length,
-            remainingCount: Math.max(0, 3 - drawnIds.length),
-            limit: 3,
+            remainingCount: Math.max(
+              0,
+              DAILY_BOTTLE_DRAW_LIMIT - drawnIds.length,
+            ),
+            limit: DAILY_BOTTLE_DRAW_LIMIT,
             idempotent: true,
           };
         }
@@ -695,7 +759,7 @@ async function drawBottle(uid, date, requestId) {
           '这只漂流瓶已经离开公共水面，请再看看远处',
         );
       }
-      if (drawnIds.length >= 3) {
+      if (drawnIds.length >= DAILY_BOTTLE_DRAW_LIMIT) {
         throw new InteractionError('LIMIT_REACHED', '今天已经捞过三只漂流瓶，明天再来看看');
       }
       const recentRef = transaction
@@ -762,11 +826,14 @@ async function drawBottle(uid, date, requestId) {
           '水面上暂时没有新的漂流瓶，晚一点再来看看',
         );
       }
-      const nextIds = [...drawnIds, selected._id];
+      const nextIds = [...drawnIds, selected._id].slice(
+        0,
+        DAILY_BOTTLE_DRAW_LIMIT,
+      );
       const nextRequests = [
         ...requests,
         { id: requestId, bottleId: selected._id },
-      ];
+      ].slice(0, DAILY_BOTTLE_DRAW_LIMIT);
       const nextDeliveryCount = selectedLifecycle.deliveryCount + 1;
       const shouldArchive = nextDeliveryCount >= BOTTLE_MAX_DELIVERIES;
       await selectedRef.update({
@@ -808,8 +875,11 @@ async function drawBottle(uid, date, requestId) {
         },
         date,
         todayCount: nextIds.length,
-        remainingCount: Math.max(0, 3 - nextIds.length),
-        limit: 3,
+        remainingCount: Math.max(
+          0,
+          DAILY_BOTTLE_DRAW_LIMIT - nextIds.length,
+        ),
+        limit: DAILY_BOTTLE_DRAW_LIMIT,
       };
     });
     return success(
@@ -881,16 +951,15 @@ async function respondBottle(uid, event) {
   return success({ response: event.response, counts });
 }
 
-async function getMyBottles(uid) {
-  const result = await bottleCollection
-    .where({ uid })
-    .orderBy('createdAt', 'desc')
-    .limit(20)
-    .get();
+async function getMyBottles(uid, date) {
+  const [result, quota] = await Promise.all([
+    bottleCollection.where({ uid }).orderBy('createdAt', 'desc').limit(20).get(),
+    getSubmissionState(uid, 'createBottle', date, DAILY_BOTTLE_CREATE_LIMIT),
+  ]);
   const bottles = (Array.isArray(result.data) ? result.data : [])
     .map((record) => safeBottle(record, true))
     .filter(Boolean);
-  return success({ bottles });
+  return success({ bottles, ...quota });
 }
 
 function capsuleQuotaId(uid) {
@@ -1246,6 +1315,15 @@ function stablePoolIndex(uid, action, date, sequence, poolSize, used) {
   return start;
 }
 
+function secureRandomPoolIndex(poolSize, used) {
+  const available = [];
+  for (let index = 0; index < poolSize; index += 1) {
+    if (!used.has(index)) available.push(index);
+  }
+  if (available.length === 0) return crypto.randomInt(poolSize);
+  return available[crypto.randomInt(available.length)];
+}
+
 async function getDailyDrawState(uid, action, date) {
   const documentId = hashDocumentId(uid, action, date);
   const result = await dailyCollection.doc(documentId).get();
@@ -1299,14 +1377,18 @@ async function drawDailyCard(uid, action, date, requestId) {
             dailyState(action, date, normalized.cards),
           );
         }
-        const nextIndex = stablePoolIndex(
-          uid,
-          action,
-          date,
-          normalized.count,
-          DAILY_POOL_SIZES[action],
-          new Set(normalized.cards),
-        );
+        const usedIndexes = new Set(normalized.cards);
+        const nextIndex =
+          action === 'drawFortune'
+            ? secureRandomPoolIndex(DAILY_POOL_SIZES[action], usedIndexes)
+            : stablePoolIndex(
+                uid,
+                action,
+                date,
+                normalized.count,
+                DAILY_POOL_SIZES[action],
+                usedIndexes,
+              );
         const nextCards = [...normalized.cards, nextIndex];
         const nextRequests = [
           ...normalized.requests,
@@ -1361,7 +1443,7 @@ exports.main = async (event, context) => {
       return await createStar(uid, date, event);
     }
     if (event.action === 'getMyStars') {
-      return await getMyStars(uid);
+      return await getMyStars(uid, date);
     }
     if (event.action === 'createBottle') {
       return await createBottle(uid, date, event);
@@ -1373,7 +1455,7 @@ exports.main = async (event, context) => {
       return await respondBottle(uid, event);
     }
     if (event.action === 'getMyBottles') {
-      return await getMyBottles(uid);
+      return await getMyBottles(uid, date);
     }
     if (event.action === 'createCapsule') {
       return await createCapsule(uid, event);

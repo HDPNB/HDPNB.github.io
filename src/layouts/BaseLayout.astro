@@ -1,6 +1,7 @@
 ---
 import Header from '@/components/Header.astro';
 import Footer from '@/components/Footer.astro';
+import DesktopPet from '@/components/DesktopPet.astro';
 import PageAmbientEffect from '@/components/PageAmbientEffect.astro';
 import SiteReactions from '@/components/SiteReactions.astro';
 import { siteConfig } from '@/data/site';
@@ -110,6 +111,7 @@ const reactionPage: SiteReactionPage | null =
       </div>
     )}
     <Footer />
+    <DesktopPet />
     <button class="back-top" type="button" aria-label="返回顶部" title="返回顶部">↑</button>
     <dialog class="lightbox" aria-label="图片大图预览">
       <button class="lightbox__close" type="button" aria-label="关闭大图">×</button>

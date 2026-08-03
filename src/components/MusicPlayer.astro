@@ -428,6 +428,7 @@ const musicTags = [...new Set(musicTracks.flatMap((track) => track.tags || []))]
       if (artist) artist.textContent = track.artist || '未填写歌手';
       if (cover) {
         cover.classList.remove('is-changing');
+        delete cover.dataset.fallbackApplied;
         cover.src = track.cover || '/images/life/my_day.webp';
         cover.alt = `${track.title}封面`;
         requestAnimationFrame(() => cover.classList.add('is-changing'));

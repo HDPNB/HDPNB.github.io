@@ -4,8 +4,9 @@ import type {
   DailyDrawResult,
   DailyDrawOverviewResult,
   DailyDrawState,
+  DailySubmissionState,
   InteractionApiResult,
-  OwnStar,
+  MyStarsState,
   PublicStar,
   StarColor,
   StarMood,
@@ -14,7 +15,7 @@ import type {
   CapsuleSummary,
   DrawnBottle,
   OpenedCapsule,
-  OwnBottle,
+  MyBottlesState,
   SiteReactionCounts,
   SiteReactionId,
   SiteReactionPage,
@@ -419,7 +420,7 @@ export function createVisitorStar(input: {
   message: string;
   mood: StarMood;
   color: StarColor;
-}): Promise<InteractionApiResult<{ date: string; todayCount: number; remainingCount: number; limit: number }>> {
+}): Promise<InteractionApiResult<DailySubmissionState>> {
   return callFeature('createStar', input);
 }
 
@@ -430,7 +431,7 @@ export function getPublicVisitorStars(): Promise<
 }
 
 export function getMyVisitorStars(): Promise<
-  InteractionApiResult<{ stars: OwnStar[] }>
+  InteractionApiResult<MyStarsState>
 > {
   return callFeature('getMyStars');
 }
@@ -438,7 +439,7 @@ export function getMyVisitorStars(): Promise<
 export function createDriftBottle(input: {
   content: string;
   category: BottleCategory;
-}): Promise<InteractionApiResult<{ date: string; todayCount: number; remainingCount: number; limit: number }>> {
+}): Promise<InteractionApiResult<DailySubmissionState>> {
   return callFeature('createBottle', input);
 }
 
@@ -463,7 +464,7 @@ export function respondToDriftBottle(
 }
 
 export function getMyDriftBottles(): Promise<
-  InteractionApiResult<{ bottles: OwnBottle[] }>
+  InteractionApiResult<MyBottlesState>
 > {
   return callFeature('getMyBottles');
 }

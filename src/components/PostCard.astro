@@ -10,7 +10,18 @@ const { title, description, pubDate, category, cover, tags } = post.data;
 <article class="post-card reveal" data-category={category} data-tags={tags.join(',')} data-date={pubDate.toISOString()} data-search={`${title} ${description} ${category} ${tags.join(' ')}`.toLowerCase()}>
   <a class="post-cover" href={`/blog/${post.slug}/`} aria-label={`阅读《${title}》`}>
     {cover
-      ? <img src={cover} alt={`${title}的封面图`} loading="lazy" width="960" height="640" />
+      ? <>
+          <img
+            src={cover}
+            alt={`${title}的封面图`}
+            loading="lazy"
+            decoding="async"
+            width="960"
+            height="640"
+            data-post-cover-image
+          />
+          <span class="cover-placeholder" data-cover-fallback hidden aria-hidden="true"></span>
+        </>
       : <span class="cover-placeholder" aria-hidden="true"></span>}
   </a>
   <div class="post-card__body">
@@ -26,3 +37,21 @@ const { title, description, pubDate, category, cover, tags } = post.data;
     </div>
   </div>
 </article>
+
+<script>
+  const setupPostCoverFallbacks = () => {
+    document.querySelectorAll<HTMLImageElement>('[data-post-cover-image]').forEach((image) => {
+      if (image.dataset.fallbackReady === 'true') return;
+      image.dataset.fallbackReady = 'true';
+      const fallback = image.nextElementSibling as HTMLElement | null;
+      const showFallback = () => {
+        image.hidden = true;
+        if (fallback?.matches('[data-cover-fallback]')) fallback.hidden = false;
+      };
+      image.addEventListener('error', showFallback, { once: true });
+      if (image.complete && image.naturalWidth === 0) showFallback();
+    });
+  };
+
+  document.addEventListener('astro:page-load', setupPostCoverFallbacks);
+</script>

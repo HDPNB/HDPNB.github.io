@@ -1,0 +1,346 @@
+---
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { desktopPetConfig } from '@/data/desktop-pet';
+
+const modelAvailable = existsSync(
+  resolve(process.cwd(), 'public/models/xiao-d/xiao-d.glb'),
+);
+---
+
+<aside
+  class="desktop-pet"
+  data-desktop-pet
+  data-model-path={desktopPetConfig.modelPath}
+  data-model-available={String(modelAvailable)}
+  data-state={modelAvailable ? 'waiting' : 'fallback'}
+  aria-label="桌面小精灵小D"
+  transition:persist="desktop-pet"
+>
+  <div class="desktop-pet__bubble" data-pet-bubble hidden aria-live="polite"></div>
+  <div class="desktop-pet__shell" data-pet-shell>
+    <button
+      class="desktop-pet__stage"
+      type="button"
+      data-pet-stage
+      aria-label="和小D互动，拖动可以移动位置"
+      title="点击和小D说话，按住可以拖动"
+    >
+      <canvas class="desktop-pet__canvas" data-pet-canvas aria-hidden="true"></canvas>
+      <span class="desktop-pet__fallback" data-pet-fallback aria-hidden="true">
+        <span class="desktop-pet__halo"></span>
+        <span class="desktop-pet__head">
+          <i></i><i></i><b></b>
+        </span>
+        <span class="desktop-pet__body"></span>
+        <span class="desktop-pet__shadow"></span>
+      </span>
+      <span class="desktop-pet__loading" data-pet-loading>
+        {modelAvailable ? '小D正在整理头发…' : '等待 xiao-d.glb'}
+      </span>
+    </button>
+    <div class="desktop-pet__controls" aria-label="小D控制">
+      <button type="button" data-pet-game title="和小D玩小游戏">玩一下</button>
+      <button type="button" data-pet-minimize title="收起或展开小D" aria-label="收起小D">－</button>
+    </div>
+  </div>
+  <section class="desktop-pet__game" data-pet-game-panel hidden aria-label="小D小游戏">
+    <header>
+      <strong data-pet-game-title>和小D玩一下</strong>
+      <button type="button" data-pet-game-close aria-label="关闭小游戏">×</button>
+    </header>
+    <div class="desktop-pet__game-body" data-pet-game-body></div>
+    <p data-pet-game-status aria-live="polite"></p>
+  </section>
+  <span class="sr-only" data-pet-status aria-live="polite"></span>
+</aside>
+
+<script>
+  import { mountDesktopPet } from '@/lib/desktop-pet';
+
+  const setupDesktopPet = () => mountDesktopPet();
+  document.addEventListener('astro:page-load', setupDesktopPet);
+  queueMicrotask(setupDesktopPet);
+</script>
+
+<style>
+  .desktop-pet {
+    --pet-width: 164px;
+    --pet-height: 206px;
+    --bubble-shift: 0px;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 88;
+    width: var(--pet-width);
+    height: var(--pet-height);
+    contain: layout style;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .desktop-pet__shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    pointer-events: auto;
+    transition: opacity .22s ease, transform .22s ease;
+  }
+
+  .desktop-pet__stage {
+    position: absolute;
+    inset: 0 0 28px;
+    width: 100%;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    border-radius: 48% 48% 34% 34% / 44% 44% 25% 25%;
+    background: radial-gradient(circle at 50% 32%, color-mix(in srgb, var(--blue) 19%, transparent), transparent 43%), linear-gradient(160deg, color-mix(in srgb, var(--surface-solid) 75%, transparent), color-mix(in srgb, var(--green) 16%, transparent));
+    box-shadow: 0 15px 35px rgba(45, 64, 70, .16), inset 0 1px rgba(255, 255, 255, .36);
+    backdrop-filter: blur(10px);
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .desktop-pet__stage:active { cursor: grabbing; }
+  .desktop-pet__stage:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+  .desktop-pet__canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: opacity .25s ease;
+  }
+
+  .desktop-pet[data-state="ready"] .desktop-pet__canvas { opacity: 1; }
+  .desktop-pet[data-state="ready"] .desktop-pet__fallback,
+  .desktop-pet[data-state="ready"] .desktop-pet__loading { opacity: 0; }
+
+  .desktop-pet__fallback {
+    position: absolute;
+    inset: 13px 12px 4px;
+    display: block;
+    transform-origin: 50% 84%;
+    transition: opacity .25s ease;
+  }
+
+  .desktop-pet__halo {
+    position: absolute;
+    left: 18%;
+    top: 12%;
+    width: 64%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--blue) 28%, transparent), transparent 67%);
+    filter: blur(4px);
+    animation: pet-halo 3.6s ease-in-out infinite;
+  }
+
+  .desktop-pet__head {
+    position: absolute;
+    left: 35%;
+    top: 22%;
+    width: 31%;
+    aspect-ratio: .88;
+    border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+    border-radius: 48% 48% 46% 46%;
+    background: linear-gradient(150deg, #fff8ef, #f0ddd0);
+    box-shadow: -24px -5px 0 -12px #55cfc6, 24px -5px 0 -12px #55cfc6;
+    z-index: 3;
+  }
+
+  .desktop-pet__head i {
+    position: absolute;
+    top: 45%;
+    width: 4px;
+    height: 7px;
+    border-radius: 99px;
+    background: #42666c;
+  }
+  .desktop-pet__head i:first-child { left: 27%; }
+  .desktop-pet__head i:nth-child(2) { right: 27%; }
+  .desktop-pet__head b {
+    position: absolute;
+    left: 43%;
+    bottom: 19%;
+    width: 15%;
+    height: 5px;
+    border-bottom: 2px solid #b56f76;
+    border-radius: 50%;
+  }
+
+  .desktop-pet__body {
+    position: absolute;
+    left: 30%;
+    top: 49%;
+    width: 40%;
+    height: 38%;
+    border-radius: 46% 46% 30% 30%;
+    background: linear-gradient(150deg, #4fc6bd, #338b94 65%, #315f6c);
+    box-shadow: inset 0 7px rgba(255,255,255,.15), -20px 22px 0 -17px #418f96, 20px 22px 0 -17px #418f96;
+    z-index: 2;
+  }
+
+  .desktop-pet__shadow {
+    position: absolute;
+    left: 24%;
+    bottom: 2%;
+    width: 52%;
+    height: 10%;
+    border-radius: 50%;
+    background: rgba(45, 65, 70, .18);
+    filter: blur(5px);
+  }
+
+  .desktop-pet__loading {
+    position: absolute;
+    left: 50%;
+    bottom: 9px;
+    width: max-content;
+    max-width: 86%;
+    padding: .28rem .48rem;
+    border-radius: 999px;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--surface-solid) 84%, transparent);
+    font-size: .62rem;
+    transform: translateX(-50%);
+    transition: opacity .25s ease;
+  }
+
+  .desktop-pet__controls {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    display: flex;
+    gap: 5px;
+    transform: translateX(-50%);
+    opacity: .68;
+    transition: opacity .2s ease;
+  }
+  .desktop-pet:hover .desktop-pet__controls,
+  .desktop-pet:focus-within .desktop-pet__controls { opacity: 1; }
+  .desktop-pet__controls button,
+  .desktop-pet__game button {
+    min-width: 28px;
+    min-height: 26px;
+    padding: .25rem .55rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--text);
+    background: color-mix(in srgb, var(--surface-solid) 91%, transparent);
+    box-shadow: var(--shadow-soft);
+    font: inherit;
+    font-size: .66rem;
+    cursor: pointer;
+  }
+
+  .desktop-pet__bubble {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    width: max-content;
+    max-width: min(260px, calc(100vw - 20px));
+    padding: .68rem .8rem;
+    border: 1px solid var(--line);
+    border-radius: 16px 16px 5px 16px;
+    color: var(--text);
+    background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+    box-shadow: 0 13px 36px rgba(40, 56, 63, .16);
+    backdrop-filter: blur(13px);
+    font-size: .78rem;
+    line-height: 1.55;
+    pointer-events: none;
+    transform: translateX(calc(-50% + var(--bubble-shift)));
+    animation: pet-bubble-in .22s ease-out;
+  }
+
+  .desktop-pet__game {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: 2;
+    width: min(330px, calc(100vw - 28px));
+    min-height: 190px;
+    padding: .8rem;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    color: var(--text);
+    background: color-mix(in srgb, var(--surface-solid) 96%, transparent);
+    box-shadow: 0 20px 55px rgba(35, 55, 65, .22);
+    backdrop-filter: blur(16px);
+    pointer-events: auto;
+  }
+  .desktop-pet__game[hidden] { display: none; }
+  .desktop-pet__game header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .7rem; }
+  .desktop-pet__game header button { font-size: 1rem; }
+  .desktop-pet__game-body { min-height: 102px; }
+  .desktop-pet__game-body p { margin: .45rem 0; }
+  .desktop-pet__game-body .pet-game-choices { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+  .desktop-pet__game-body .pet-game-target {
+    position: absolute;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    font-size: 1.3rem;
+  }
+  .desktop-pet__game-body .pet-game-field {
+    position: relative;
+    height: 112px;
+    overflow: hidden;
+    border: 1px dashed var(--line);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--blue) 7%, transparent);
+  }
+  .desktop-pet__game > p { min-height: 1.4em; margin: .55rem 0 0; color: var(--muted); font-size: .72rem; }
+
+  .desktop-pet.is-minimized { --pet-width: 54px; --pet-height: 54px; }
+  .desktop-pet.is-minimized .desktop-pet__stage { inset: 0; border-radius: 50%; }
+  .desktop-pet.is-minimized .desktop-pet__controls,
+  .desktop-pet.is-minimized .desktop-pet__loading { display: none; }
+  .desktop-pet.is-minimized .desktop-pet__fallback { inset: 4px; transform: scale(.8); }
+
+  .desktop-pet[data-action="wave"] .desktop-pet__fallback { animation: pet-wave .8s ease-in-out; }
+  .desktop-pet[data-action="jump"], .desktop-pet[data-action="happy"] { animation: pet-jump .75s ease; }
+  .desktop-pet[data-action="spin"] .desktop-pet__fallback { animation: pet-spin .9s ease; }
+  .desktop-pet[data-action="dance"] .desktop-pet__fallback { animation: pet-dance 1.4s ease-in-out; }
+  .desktop-pet[data-action="shake"] .desktop-pet__fallback,
+  .desktop-pet[data-action="sad"] .desktop-pet__fallback { animation: pet-shake .7s ease; }
+  .desktop-pet[data-action="stretch"] .desktop-pet__fallback { animation: pet-stretch 1.1s ease; }
+  .desktop-pet[data-action="sleep"] .desktop-pet__fallback,
+  .desktop-pet[data-action="sit"] .desktop-pet__fallback { transform: scaleY(.82) translateY(10px); }
+  .desktop-pet[data-action="look"] .desktop-pet__head,
+  .desktop-pet[data-action="read"] .desktop-pet__head { animation: pet-look 1.5s ease-in-out; }
+
+  @keyframes pet-bubble-in { from { opacity: 0; transform: translateX(calc(-50% + var(--bubble-shift))) translateY(8px); } }
+  @keyframes pet-halo { 50% { transform: scale(1.08); opacity: .72; } }
+  @keyframes pet-wave { 25% { transform: rotate(-7deg); } 65% { transform: rotate(8deg); } }
+  @keyframes pet-jump { 45% { transform: translateY(-18px); } }
+  @keyframes pet-spin { to { transform: rotate(360deg); } }
+  @keyframes pet-dance { 25% { transform: rotate(-7deg) translateY(-5px); } 50% { transform: rotate(7deg); } 75% { transform: rotate(-4deg) translateY(-8px); } }
+  @keyframes pet-shake { 25% { transform: translateX(-6px); } 50% { transform: translateX(6px); } 75% { transform: translateX(-3px); } }
+  @keyframes pet-stretch { 45% { transform: scaleY(1.1) translateY(-5px); } }
+  @keyframes pet-look { 35% { transform: translateX(-4px) rotate(-5deg); } 70% { transform: translateX(4px) rotate(5deg); } }
+
+  @media (max-width: 720px) {
+    .desktop-pet { --pet-width: 116px; --pet-height: 148px; }
+    .desktop-pet__controls button { padding: .2rem .42rem; font-size: .58rem; }
+    .desktop-pet__bubble { max-width: min(220px, calc(100vw - 16px)); font-size: .72rem; }
+  }
+
+  @media (max-width: 360px) {
+    .desktop-pet { --pet-width: 94px; --pet-height: 122px; }
+    .desktop-pet__controls button:first-child { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .desktop-pet, .desktop-pet *, .desktop-pet *::before, .desktop-pet *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: .01ms !important;
+    }
+  }
+</style>

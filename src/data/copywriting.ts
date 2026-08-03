@@ -342,6 +342,26 @@ function composeCopies(
   return [...values];
 }
 
+function appendCopiesPreservingBase(
+  base: readonly string[],
+  beginnings: readonly string[],
+  endings: readonly string[],
+  target: number,
+): string[] {
+  const values = [...base];
+  const seen = new Set(base);
+  for (const beginning of beginnings) {
+    for (const ending of endings) {
+      if (values.length >= target) return values;
+      const value = `${beginning}${ending}`;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      values.push(value);
+    }
+  }
+  return values;
+}
+
 export const expandedHomeWelcomeCopies = composeCopies(
   homeWelcomeCopies,
   [
@@ -363,7 +383,7 @@ export const expandedHomeWelcomeCopies = composeCopies(
   60,
 );
 
-export const expandedDailyFortuneCopies = composeCopies(
+const legacyDailyFortuneCopies = composeCopies(
   dailyFortuneCopies,
   [
     '今天适合先做一件小事',
@@ -372,6 +392,15 @@ export const expandedDailyFortuneCopies = composeCopies(
     '把脚步放慢一点',
     '从能确认的地方开始',
     '忙到一半的时候',
+    '想尝试新东西的时候',
+    '感觉心里有点乱的时候',
+    '灵感还没来的时候',
+    '需要回应别人之前',
+    '对自己不太满意的时候',
+    '想重新开始的时候',
+    '今天没有那么顺利的时候',
+    '事情比预想中复杂的时候',
+    '不知道先做什么的时候',
   ],
   [
     '，完成以后再决定下一步',
@@ -381,10 +410,57 @@ export const expandedDailyFortuneCopies = composeCopies(
     '，小小的确定也很有用',
     '，记得把水杯装满',
   ],
-  60,
+  120,
 );
 
-export const expandedMemoryCardCopies = composeCopies(
+export const DAILY_FORTUNE_POOL_SIZE = 300;
+
+export const expandedDailyFortuneCopies = composeCopies(
+  legacyDailyFortuneCopies,
+  [
+    '今天可以为学习留一段不被打扰的时间',
+    '今天可以把最难的任务切成几个小块',
+    '今天可以回看一次做错的题和改动记录',
+    '今天可以先验证一个最简单的假设',
+    '今天可以把刚学会的内容讲给自己听',
+    '今天可以先处理工作里最明确的阻塞点',
+    '今天可以把需求重新写成输入和输出',
+    '今天可以给正在推进的事情补一段说明',
+    '今天可以先完成一个能交付的小版本',
+    '今天可以把重复操作交给一段小脚本',
+    '今天可以认真吃饭并把水杯装满',
+    '今天可以整理一小块桌面而不是整个房间',
+    '今天可以在回去的路上多看一会天空',
+    '今天可以给普通生活拍一张没有任务的照片',
+    '今天可以提前一点结束熬得太久的事情',
+    '今天可以承认自己的心情暂时有点乱',
+    '今天可以把担心写下来再区分事实和猜测',
+    '今天可以少解释一次并先照顾真实感受',
+    '今天可以允许自己没有持续保持高效率',
+    '今天可以把一句自我批评换成具体问题',
+    '今天可以在疲惫出现时早点停下来',
+    '今天可以让眼睛离开屏幕看看远处',
+    '今天可以用十分钟什么都不安排',
+    '今天可以把睡眠放在最后一个报错前面',
+    '今天可以拒绝用休息时间惩罚没完成的自己',
+    '今天可以试一条和平常不同的小路线',
+    '今天可以把放了很久的想法做成草稿',
+    '今天可以为一个选择再收集一点真实信息',
+    '今天可以先听完对方的话再准备回应',
+    '今天可以给一段关系留出不急着判断的空间',
+  ],
+  [
+    '，先把最小的一步完成',
+    '，给自己留一点调整空间',
+    '，做完以后记得停下来看看',
+    '，不必和别人的速度比较',
+    '，也许会遇见一个意外的小答案',
+    '，今天做到这里也算认真生活',
+  ],
+  DAILY_FORTUNE_POOL_SIZE,
+);
+
+const generatedLegacyMemoryCardCopies = composeCopies(
   memoryCardCopies,
   [
     '今天留下的是一段普通时间',
@@ -403,6 +479,62 @@ export const expandedMemoryCardCopies = composeCopies(
     '，现在都安静地收好了',
   ],
   60,
+);
+
+// 旧云函数池大小为 60，而旧前端只生成了 56 条。
+// 56～59 过去通过取模显示 0～3，先显式补齐这四个索引，保证旧记录刷新后不变。
+const legacyMemoryCardCopies = Array.from(
+  { length: 60 },
+  (_, index) =>
+    generatedLegacyMemoryCardCopies[index % generatedLegacyMemoryCardCopies.length],
+);
+
+export const MEMORY_CARD_POOL_SIZE = 240;
+
+export const expandedMemoryCardCopies = appendCopiesPreservingBase(
+  legacyMemoryCardCopies,
+  [
+    '今天终于把一件拖了很久的小事做完了',
+    '今天在笔记边上留下了一个有用的关键词',
+    '今天读懂了一段昨天还觉得很绕的内容',
+    '今天把一个大目标改写成了三件小事',
+    '今天在报错里找到了一条真正有用的线索',
+    '今天完成了一次不太完美但真实的尝试',
+    '今天给正在学习的内容留了半小时安静时间',
+    '今天及时保存了草稿和还没整理完的想法',
+    '今天把桌面上缠在一起的线理顺了一点',
+    '今天认真吃完了一顿没有被催促的饭',
+    '今天从窗边看见云慢慢换了一个形状',
+    '今天在回去路上多走了一段安静的路',
+    '今天拍下一张没有特别主题的普通照片',
+    '今天关掉了几个一直没有再看的标签页',
+    '今天给房间里最乱的一小块腾出了位置',
+    '今天没有强迫自己马上恢复好心情',
+    '今天把焦虑里的事实和想象分开写了下来',
+    '今天愿意承认有些事情暂时还没有答案',
+    '今天少责怪了自己一次',
+    '今天在情绪很满的时候先停了几分钟',
+    '今天为明天写下了一个足够小的目标',
+    '今天只推进了一点，但没有完全停在原地',
+    '今天把最需要完成的一件事放到了前面',
+    '今天没有把临时变化当成计划失败',
+    '今天给一个旧想法重新起了名字',
+    '今天在困的时候选择了休息而不是硬撑',
+    '今天让眼睛离开屏幕认真看了一会远处',
+    '今天把最后一点工作留给了明天',
+    '今天接受了自己的状态没有预想中那么好',
+    '今天从一句普通问候里感到了一点温柔',
+    '今天发现一件小幸运刚好落在手边',
+  ],
+  [
+    '，这件小事值得被今天记住',
+    '，以后回头看时也许会认出来',
+    '，不需要急着把它写成结论',
+    '，它让普通的一天有了具体形状',
+    '，先轻轻放进这张卡片',
+    '，剩下的明天再继续也来得及',
+  ],
+  MEMORY_CARD_POOL_SIZE,
 );
 
 export const expandedSakuraProgressCopies = composeCopies(
@@ -484,12 +616,10 @@ export const expandedMusicEmptyCopies = composeCopies(
 
 export const starWallCopies = {
   empty: composeCopies([], ['星空里暂时没有访客的星星', '今晚这片天空还很安静', '第一颗访客星还没有升起', '空白的夜色正在等待', '这面星墙还留着很多位置', '此刻只有缓慢移动的星尘'], ['，也许下一颗会来自你', '，但仍然可以慢慢看看', '，已经公开的星星会出现在这里', '，不用急着把夜空填满', '，每一句话都有自己的位置', '，安静也是星空的一部分'], 48),
-  success: composeCopies([], ['这颗星已经升上夜空', '你的小星星亮起来了', '这句话已经被夜色收好', '一颗新星找到了位置', '今晚的天空多了一点光', '星光已经顺利抵达'], ['，现在就能在星空里看见', '，它会留在这里慢慢发亮', '，也许下一个人会刚好抬头', '，谢谢你留下一小段光', '，今天只能创建这一颗', '，现在可以看看其他星星'], 48),
   browse: composeCopies([], ['轻轻拖动这片星空', '点击一颗已经公开的星', '缩放不要太快', '每颗星只带着一句话', '亮度不同只是视觉变化', '手机端的星空更简洁'], ['，可以看看它留下了什么', '，卡片会慢慢展开', '，让星星保持安静移动', '，不会显示访客身份信息', '，不代表任何人数排名', '，也保留完整的阅读体验'], 48),
 };
 
 export const driftBottleCopies = {
-  create: composeCopies([], ['纸条已经折好', '瓶塞轻轻合上了', '这只瓶子开始出发', '你写下的话已经被海面收好', '水面刚好有一点风', '漂流瓶离开了岸边'], ['，它正慢慢漂向远处', '，今天的投递次数已经使用', '，内容只会按纯文本保存', '，它不会立刻被谁捡到', '，谢谢你认真写下这句话', '，接下来交给缓慢的水流'], 48),
   draw: composeCopies([], ['一只瓶子慢慢靠岸', '今天捞到一张小纸条', '水面送来一段话', '瓶子在手边轻轻晃动', '这次遇见来自一个陌生人', '纸条已经慢慢展开'], ['，读完以后可以留下固定回应', '，不会显示投递者身份', '，也许刚好适合此刻看到', '，今天还能再捞几次', '，不必自由回复或私聊', '，请温柔地读完它'], 48),
   empty: composeCopies([], ['水面上暂时没有可捞取的瓶子', '今天还没有新的纸条靠岸', '附近的漂流瓶已经遇见过了', '这一刻水面有点安静', '正在漂流的瓶子暂时不在附近', '今天的三次捞取已经结束'], ['，晚一点再回来看看', '，也许下一阵风会带来新的', '，不会拿不合适的内容补足', '，空水面也可以停一会', '，你不会捞到自己的瓶子', '，明天会重新获得次数'], 48),
   response: composeCopies([], ['固定回应已经送到', '这只瓶子收到了一个小回应', '你留下的回应很轻', '纸条的另一端多了一点回声', '回应已经安全记录', '这次回应没有附带私信'], ['，不会重复增加数量', '，也不会暴露你的身份', '，谢谢你温柔地接住它', '，只有预设选项会被保存', '，不用再连续点击', '，现在可以把瓶子放回水面'], 48),
@@ -512,7 +642,7 @@ export const dailyLimitCopies = composeCopies(
   48,
 );
 
-export const memoryCardDeck = expandedMemoryCardCopies.slice(0, 60).map(
+export const memoryCardDeck = expandedMemoryCardCopies.map(
   (text, index) => ({
     text,
     subtitle: ['普通的一天', '今天的微光', '慢慢留下', '一页生活', '仍在前进'][index % 5],

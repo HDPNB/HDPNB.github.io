@@ -59,7 +59,7 @@ const responses = [
       <div>
         <span class="eyebrow">SEND A NOTE</span>
         <h2>投下一张纸条</h2>
-        <p>每天最多投递一只，合上瓶塞以后就让它慢慢出发</p>
+        <p>每天最多投递五只，合上瓶塞以后就让它慢慢出发</p>
       </div>
       <label class="interaction-field">
         <span>纸条内容</span>
@@ -98,6 +98,7 @@ const responses = [
   import type {
     BottleCategory,
     BottleResponse,
+    DailySubmissionState,
     DrawnBottle,
     OwnBottle,
   } from '@/types/site-interactions';
@@ -136,11 +137,29 @@ const responses = [
   let activeBottle: DrawnBottle | null = null;
   let drawBusy = false;
   let submitBusy = false;
+  let createLimitReached = false;
   let destroyed = false;
   let revealTimer = 0;
 
   const message = (pool: string, fallback: string) =>
     pickRandom(copy[pool] || [], random).value || fallback;
+
+  const renderCreateState = (state: DailySubmissionState) => {
+    const limit = Math.max(1, state.limit);
+    const todayCount = Math.max(0, Math.min(limit, state.todayCount));
+    const remainingCount = Math.max(0, Math.min(limit, state.remainingCount));
+    const reachedLimit = remainingCount === 0;
+    createLimitReached = reachedLimit;
+    if (submit) {
+      submit.disabled = submitBusy || reachedLimit;
+      submit.textContent = reachedLimit ? '今天已投递五只' : '放入漂流池';
+    }
+    if (formStatus) {
+      formStatus.textContent = reachedLimit
+        ? '今天的五只漂流瓶都已经出发了，明天再来吧'
+        : `今天已投递 ${todayCount}/${limit} 只，还可以投递 ${remainingCount} 只`;
+    }
+  };
 
   const showBottle = (bottle: DrawnBottle) => {
     if (!paper) return;
@@ -228,17 +247,21 @@ const responses = [
       category: String(data.get('category')) as BottleCategory,
     });
     submitBusy = false;
-    submit.disabled = false;
-    submit.textContent = '放入漂流池';
     if (!result.ok) {
-      if (formStatus) formStatus.textContent = result.message;
+      const reachedLimit = result.code === 'limit-reached';
+      createLimitReached ||= reachedLimit;
+      submit.disabled = createLimitReached;
+      submit.textContent = reachedLimit ? '今天已投递五只' : '放入漂流池';
+      if (formStatus) {
+        formStatus.textContent = reachedLimit
+          ? '今天的五只漂流瓶都已经出发了，明天再来吧'
+          : result.message;
+      }
       return;
     }
     input.value = '';
     if (count) count.textContent = '0';
-    if (formStatus) {
-      formStatus.textContent = message('create', '瓶塞已经合上，它正慢慢漂向远处');
-    }
+    renderCreateState(result.data);
     await loadMine();
   });
 
@@ -267,6 +290,10 @@ const responses = [
     if (destroyed) return;
     const result = await getMyDriftBottles();
     if (!result.ok) {
+      if (submit) {
+        submit.disabled = submitBusy || createLimitReached;
+        submit.textContent = '放入漂流池';
+      }
       if (myBottles) {
         myBottles.textContent = result.code === 'signed-out'
           ? '登录后可以查看自己的公开状态'
@@ -274,6 +301,7 @@ const responses = [
       }
       return;
     }
+    renderCreateState(result.data);
     renderMine(Array.isArray(result.data.bottles) ? result.data.bottles : []);
   };
 

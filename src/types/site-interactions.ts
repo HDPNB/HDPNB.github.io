@@ -97,6 +97,17 @@ export interface OwnStar {
   createdAt: string;
 }
 
+export interface DailySubmissionState {
+  date: string;
+  todayCount: number;
+  remainingCount: number;
+  limit: number;
+}
+
+export interface MyStarsState extends DailySubmissionState {
+  stars: OwnStar[];
+}
+
 export type InteractionApiResult<T> =
   | { ok: true; data: T }
   | {
@@ -136,6 +147,10 @@ export interface OwnBottle {
   category: BottleCategory;
   status: ReviewStatus;
   createdAt: string;
+}
+
+export interface MyBottlesState extends DailySubmissionState {
+  bottles: OwnBottle[];
 }
 
 export interface CapsuleSummary {

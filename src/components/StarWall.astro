@@ -52,7 +52,7 @@ const colors = [
       <div>
         <span class="eyebrow">LEAVE A STAR</span>
         <h2>升起一颗星星</h2>
-        <p>每天最多一颗，升起以后就会出现在这片夜空</p>
+        <p>每天最多三颗，升起以后就会出现在这片夜空</p>
       </div>
       <label class="interaction-field">
         <span>一句话</span>
@@ -93,6 +93,7 @@ const colors = [
   } from '@/lib/site-interactions';
   import { entryRandom, hashSeed, pickRandom } from '@/lib/random';
   import type {
+    DailySubmissionState,
     OwnStar,
     PublicStar,
     StarColor,
@@ -125,7 +126,6 @@ const colors = [
   const myStars = root?.querySelector<HTMLElement>('[data-my-stars]');
   const copy = JSON.parse(root?.dataset.copy || '{}') as {
     empty?: string[];
-    success?: string[];
     browse?: string[];
   };
   const random = entryRandom('visitor-star-wall');
@@ -166,10 +166,28 @@ const colors = [
   let lastY = 0;
   let raf = 0;
   let busy = false;
+  let createLimitReached = false;
   let destroyed = false;
 
   const randomCopy = (values: string[] | undefined, fallback: string) =>
     pickRandom(values || [], random).value || fallback;
+
+  const renderCreateState = (state: DailySubmissionState) => {
+    const limit = Math.max(1, state.limit);
+    const todayCount = Math.max(0, Math.min(limit, state.todayCount));
+    const remainingCount = Math.max(0, Math.min(limit, state.remainingCount));
+    const reachedLimit = remainingCount === 0;
+    createLimitReached = reachedLimit;
+    if (submit) {
+      submit.disabled = busy || reachedLimit;
+      submit.textContent = reachedLimit ? '今天已留下三颗' : '让星星升起来';
+    }
+    if (formStatus) {
+      formStatus.textContent = reachedLimit
+        ? '今天的三颗星星都已经升起来了，明天再来看看'
+        : `今天已留下 ${todayCount}/${limit} 颗，还可以留下 ${remainingCount} 颗`;
+    }
+  };
 
   const safeStars = (values: unknown): PublicStar[] =>
     Array.isArray(values)
@@ -305,11 +323,16 @@ const colors = [
   const loadMine = async () => {
     const result = await getMyVisitorStars();
     if (!result.ok) {
+      if (submit) {
+        submit.disabled = busy || createLimitReached;
+        submit.textContent = '让星星升起来';
+      }
       if (myStars) myStars.textContent = result.code === 'signed-out'
         ? '登录后可以查看自己的公开状态'
         : result.message;
       return;
     }
+    renderCreateState(result.data);
     renderMyStars(Array.isArray(result.data.stars) ? result.data.stars : []);
   };
 
@@ -386,20 +409,21 @@ const colors = [
       color: String(data.get('color')) as StarColor,
     });
     busy = false;
-    submit.disabled = false;
-    submit.textContent = '让星星升起来';
     if (!result.ok) {
-      if (formStatus) formStatus.textContent = result.message;
+      const reachedLimit = result.code === 'limit-reached';
+      createLimitReached ||= reachedLimit;
+      submit.disabled = createLimitReached;
+      submit.textContent = reachedLimit ? '今天已留下三颗' : '让星星升起来';
+      if (formStatus) {
+        formStatus.textContent = reachedLimit
+          ? '今天的三颗星星都已经升起来了，明天再来看看'
+          : result.message;
+      }
       return;
     }
     messageInput.value = '';
     if (count) count.textContent = '0';
-    if (formStatus) {
-      formStatus.textContent = randomCopy(
-        copy.success,
-        '这颗星已经升上夜空',
-      );
-    }
+    renderCreateState(result.data);
     await Promise.all([loadMine(), loadPublic()]);
   });
 
