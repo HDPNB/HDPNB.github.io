@@ -7,30 +7,21 @@ import {
 const initialScreenshots = gameScreenshots.slice(0, gameGalleryPageSize);
 ---
 
-<section
-  class="game-gallery"
-  data-game-gallery
-  data-screenshots={JSON.stringify(gameScreenshots)}
-  data-page-size={String(gameGalleryPageSize)}
-  aria-labelledby="game-gallery-title"
->
-  <header>
-    <span class="eyebrow">GAME MOMENTS</span>
-    <h2 id="game-gallery-title">游戏截图</h2>
-    <p>缩略图按批次加载，点开时才会请求较大的图片</p>
-  </header>
+{gameScreenshots.length > 0 && (
+  <>
+    <section
+      class="game-gallery"
+      data-game-gallery
+      data-screenshots={JSON.stringify(gameScreenshots)}
+      data-page-size={String(gameGalleryPageSize)}
+      aria-labelledby="game-gallery-title"
+    >
+      <header>
+        <span class="eyebrow">GAME MOMENTS</span>
+        <h2 id="game-gallery-title">游戏截图</h2>
+        <p>一些当时舍不得错过的画面。</p>
+      </header>
 
-  {gameScreenshots.length === 0 ? (
-    <div class="game-gallery__empty">
-      <strong>截图文件夹暂时还是空的</strong>
-      <p>
-        请把图片放到 <code>public/images/games/</code>，优先转换为 WebP 或 AVIF，
-        再到 <code>src/data/game-gallery.ts</code> 添加标题、缩略图、大图和尺寸。
-      </p>
-      <p>建议一张截图准备一个轻量缩略图；大图只会在点击查看时加载。</p>
-    </div>
-  ) : (
-    <>
       <div class="game-gallery__grid" data-game-gallery-grid>
         {initialScreenshots.map((shot) => (
           <button
@@ -62,176 +53,189 @@ const initialScreenshots = gameScreenshots.slice(0, gameGalleryPageSize);
       >
         加载更多
       </button>
-    </>
-  )}
 
-  <dialog class="game-gallery__lightbox" data-game-gallery-lightbox aria-label="游戏截图大图">
-    <button type="button" data-game-gallery-close aria-label="关闭截图">×</button>
-    <figure>
-      <img alt="" decoding="async" />
-      <figcaption></figcaption>
-    </figure>
-  </dialog>
-</section>
+      <dialog class="game-gallery__lightbox" data-game-gallery-lightbox aria-label="游戏截图大图">
+        <button type="button" data-game-gallery-close aria-label="关闭截图">×</button>
+        <figure>
+          <img alt="" decoding="async" />
+          <figcaption></figcaption>
+        </figure>
+      </dialog>
+    </section>
 
-<script>
-  import type { GameScreenshot } from '@/data/game-gallery';
+    <script is:inline data-astro-rerun>
+      (() => {
+        const root = document.querySelector('[data-game-gallery]');
+        if (!root) return;
 
-  let gameGalleryController: AbortController | undefined;
+        window.__gameGalleryController?.abort();
+        const controller = new AbortController();
+        window.__gameGalleryController = controller;
+        const { signal } = controller;
+        const grid = root.querySelector('[data-game-gallery-grid]');
+        const more = root.querySelector('[data-game-gallery-more]');
+        const dialog = root.querySelector('[data-game-gallery-lightbox]');
+        const dialogImage = dialog?.querySelector('img');
+        const caption = dialog?.querySelector('figcaption');
+        const pageSize = Math.max(1, Number(root.dataset.pageSize) || 8);
+        const screenshots = JSON.parse(root.dataset.screenshots || '[]');
+        let visibleCount = Math.min(pageSize, screenshots.length);
+        let activeTrigger = null;
 
-  const setupGameGallery = () => {
-    gameGalleryController?.abort();
-    const root = document.querySelector<HTMLElement>('[data-game-gallery]');
-    if (!root) return;
-    gameGalleryController = new AbortController();
-    const { signal } = gameGalleryController;
-    const grid = root.querySelector<HTMLElement>('[data-game-gallery-grid]');
-    const more = root.querySelector<HTMLButtonElement>('[data-game-gallery-more]');
-    const dialog = root.querySelector<HTMLDialogElement>('[data-game-gallery-lightbox]');
-    const dialogImage = dialog?.querySelector('img');
-    const caption = dialog?.querySelector('figcaption');
-    const pageSize = Math.max(1, Number(root.dataset.pageSize) || 8);
-    const screenshots = JSON.parse(root.dataset.screenshots || '[]') as GameScreenshot[];
-    let visibleCount = Math.min(pageSize, screenshots.length);
-    let activeTrigger: HTMLButtonElement | null = null;
+        const createItem = (shot) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'game-gallery__item';
+          button.dataset.gameShot = shot.id;
+          button.style.setProperty('--shot-ratio', `${shot.width}/${shot.height}`);
+          const image = document.createElement('img');
+          image.src = shot.thumbnail;
+          image.alt = shot.title;
+          image.loading = 'lazy';
+          image.decoding = 'async';
+          image.width = shot.width;
+          image.height = shot.height;
+          const label = document.createElement('span');
+          const title = document.createElement('strong');
+          title.textContent = shot.title;
+          label.appendChild(title);
+          if (shot.game) {
+            const game = document.createElement('small');
+            game.textContent = shot.game;
+            label.appendChild(game);
+          }
+          button.append(image, label);
+          return button;
+        };
 
-    const createItem = (shot: GameScreenshot) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'game-gallery__item';
-      button.dataset.gameShot = shot.id;
-      button.style.setProperty('--shot-ratio', `${shot.width}/${shot.height}`);
-      const image = document.createElement('img');
-      image.src = shot.thumbnail;
-      image.alt = shot.title;
-      image.loading = 'lazy';
-      image.decoding = 'async';
-      image.width = shot.width;
-      image.height = shot.height;
-      const label = document.createElement('span');
-      const title = document.createElement('strong');
-      title.textContent = shot.title;
-      label.appendChild(title);
-      if (shot.game) {
-        const game = document.createElement('small');
-        game.textContent = shot.game;
-        label.appendChild(game);
+        more?.addEventListener('click', () => {
+          if (!grid) return;
+          const next = Math.min(screenshots.length, visibleCount + pageSize);
+          const fragment = document.createDocumentFragment();
+          screenshots
+            .slice(visibleCount, next)
+            .forEach((shot) => fragment.appendChild(createItem(shot)));
+          grid.appendChild(fragment);
+          visibleCount = next;
+          more.hidden = visibleCount >= screenshots.length;
+        }, { signal });
+
+        root.addEventListener('click', (event) => {
+          const trigger = event.target instanceof Element
+            ? event.target.closest('[data-game-shot]')
+            : null;
+          if (!trigger || !dialog || !dialogImage || !caption) return;
+          const shot = screenshots.find((item) => item.id === trigger.dataset.gameShot);
+          if (!shot) return;
+          activeTrigger = trigger;
+          dialogImage.src = shot.full;
+          dialogImage.alt = shot.title;
+          caption.textContent = [shot.title, shot.game, shot.note].filter(Boolean).join(' · ');
+          dialog.showModal();
+        }, { signal });
+
+        dialog?.querySelector('[data-game-gallery-close]')?.addEventListener(
+          'click',
+          () => dialog.close(),
+          { signal },
+        );
+        dialog?.addEventListener('click', (event) => {
+          if (event.target === dialog) dialog.close();
+        }, { signal });
+        dialog?.addEventListener('close', () => {
+          dialogImage?.removeAttribute('src');
+          activeTrigger?.focus();
+          activeTrigger = null;
+        }, { signal });
+        document.addEventListener(
+          'astro:before-swap',
+          () => controller.abort(),
+          { once: true, signal },
+        );
+      })();
+    </script>
+
+    <style is:inline>
+      .game-gallery { margin: 2rem 0; }
+      .game-gallery > header { margin-bottom: 1rem; }
+      .game-gallery > header h2 { margin: .15rem 0 .35rem; }
+      .game-gallery > header p { margin: 0; color: var(--muted); }
+      .game-gallery__grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: .85rem;
       }
-      button.append(image, label);
-      return button;
-    };
-
-    more?.addEventListener('click', () => {
-      if (!grid) return;
-      const next = Math.min(screenshots.length, visibleCount + pageSize);
-      const fragment = document.createDocumentFragment();
-      screenshots.slice(visibleCount, next).forEach((shot) => fragment.appendChild(createItem(shot)));
-      grid.appendChild(fragment);
-      visibleCount = next;
-      more.hidden = visibleCount >= screenshots.length;
-    }, { signal });
-
-    root.addEventListener('click', (event) => {
-      const trigger = event.target instanceof Element
-        ? event.target.closest<HTMLButtonElement>('[data-game-shot]')
-        : null;
-      if (!trigger || !dialog || !dialogImage || !caption) return;
-      const shot = screenshots.find((item) => item.id === trigger.dataset.gameShot);
-      if (!shot) return;
-      activeTrigger = trigger;
-      dialogImage.src = shot.full;
-      dialogImage.alt = shot.title;
-      caption.textContent = [shot.title, shot.game, shot.note].filter(Boolean).join(' · ');
-      dialog.showModal();
-    }, { signal });
-
-    dialog?.querySelector('[data-game-gallery-close]')?.addEventListener(
-      'click',
-      () => dialog.close(),
-      { signal },
-    );
-    dialog?.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
-    }, { signal });
-    dialog?.addEventListener('close', () => {
-      dialogImage?.removeAttribute('src');
-      activeTrigger?.focus();
-      activeTrigger = null;
-    }, { signal });
-    document.addEventListener('astro:before-swap', () => gameGalleryController?.abort(), { once: true, signal });
-  };
-
-  document.addEventListener('astro:page-load', setupGameGallery);
-</script>
-
-<style>
-  .game-gallery { margin: 2rem 0; }
-  .game-gallery > header { margin-bottom: 1rem; }
-  .game-gallery > header h2 { margin: .15rem 0 .35rem; }
-  .game-gallery > header p { margin: 0; color: var(--muted); }
-  .game-gallery__grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: .85rem;
-  }
-  .game-gallery__item {
-    position: relative;
-    padding: 0;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    color: inherit;
-    background: var(--surface-solid);
-    box-shadow: var(--shadow-soft);
-    text-align: left;
-    cursor: zoom-in;
-  }
-  .game-gallery__item img {
-    display: block;
-    width: 100%;
-    aspect-ratio: var(--shot-ratio, 16 / 9);
-    object-fit: cover;
-    background: var(--surface-alt);
-  }
-  .game-gallery__item span { display: flex; justify-content: space-between; gap: .7rem; padding: .65rem .75rem; }
-  .game-gallery__item small { color: var(--muted); }
-  .game-gallery__more { display: block; margin: 1rem auto 0; }
-  .game-gallery__more[hidden] { display: none; }
-  .game-gallery__empty {
-    padding: 1.2rem;
-    border: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
-    border-radius: 18px;
-    background: color-mix(in srgb, var(--surface-alt) 75%, transparent);
-  }
-  .game-gallery__empty p { margin: .45rem 0 0; }
-  .game-gallery__empty code { overflow-wrap: anywhere; }
-  .game-gallery__lightbox {
-    width: min(920px, calc(100vw - 24px));
-    max-height: calc(100vh - 24px);
-    padding: 0;
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    color: var(--text);
-    background: var(--surface-solid);
-    box-shadow: 0 25px 80px rgba(28, 40, 50, .34);
-  }
-  .game-gallery__lightbox::backdrop { background: rgba(20, 30, 36, .66); backdrop-filter: blur(5px); }
-  .game-gallery__lightbox > button {
-    position: absolute;
-    right: .65rem;
-    top: .65rem;
-    z-index: 2;
-    width: 36px;
-    height: 36px;
-    border: 0;
-    border-radius: 50%;
-    color: var(--text);
-    background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
-    font-size: 1.3rem;
-    cursor: pointer;
-  }
-  .game-gallery__lightbox figure { margin: 0; }
-  .game-gallery__lightbox img { display: block; width: 100%; max-height: calc(100vh - 95px); object-fit: contain; background: #162126; }
-  .game-gallery__lightbox figcaption { padding: .75rem 1rem; color: var(--muted); }
-  @media (max-width: 560px) { .game-gallery__grid { grid-template-columns: 1fr; } }
-</style>
+      .game-gallery__item {
+        position: relative;
+        padding: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        color: inherit;
+        background: var(--surface-solid);
+        box-shadow: var(--shadow-soft);
+        text-align: left;
+        cursor: zoom-in;
+      }
+      .game-gallery__item img {
+        display: block;
+        width: 100%;
+        aspect-ratio: var(--shot-ratio, 16 / 9);
+        object-fit: cover;
+        background: var(--surface-alt);
+      }
+      .game-gallery__item span {
+        display: flex;
+        justify-content: space-between;
+        gap: .7rem;
+        padding: .65rem .75rem;
+      }
+      .game-gallery__item small { color: var(--muted); }
+      .game-gallery__more { display: block; margin: 1rem auto 0; }
+      .game-gallery__more[hidden] { display: none; }
+      .game-gallery__lightbox {
+        width: min(920px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        color: var(--text);
+        background: var(--surface-solid);
+        box-shadow: 0 25px 80px rgba(28, 40, 50, .34);
+      }
+      .game-gallery__lightbox::backdrop {
+        background: rgba(20, 30, 36, .66);
+        backdrop-filter: blur(5px);
+      }
+      .game-gallery__lightbox > button {
+        position: absolute;
+        right: .65rem;
+        top: .65rem;
+        z-index: 2;
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 50%;
+        color: var(--text);
+        background: color-mix(in srgb, var(--surface-solid) 88%, transparent);
+        font-size: 1.3rem;
+        cursor: pointer;
+      }
+      .game-gallery__lightbox figure { margin: 0; }
+      .game-gallery__lightbox img {
+        display: block;
+        width: 100%;
+        max-height: calc(100vh - 95px);
+        object-fit: contain;
+        background: #162126;
+      }
+      .game-gallery__lightbox figcaption {
+        padding: .75rem 1rem;
+        color: var(--muted);
+      }
+      @media (max-width: 560px) {
+        .game-gallery__grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </>
+)}
